@@ -62,6 +62,8 @@ class EventIn(BaseModel):
     value: dict = Field(default_factory=dict)
     confidence: float | None = None
     model_version: str | None = None
+    source: str | None = None
+    device_id: str | None = None
 
 
 class HeartbeatIn(BaseModel):
@@ -69,6 +71,8 @@ class HeartbeatIn(BaseModel):
     resident_id: str | None = None
     ts: datetime | None = None
     model_version: str | None = "edge-heartbeat"
+    device_id: str | None = None
+    value: dict = Field(default_factory=dict)
 
 
 class PlanDecision(BaseModel):
@@ -212,9 +216,11 @@ def post_heartbeat(
         "resident_id": body.resident_id,
         "ts": body.ts or utcnow(),
         "kind": "heartbeat",
-        "value": {},
+        "value": body.value or {},
         "confidence": None,
         "model_version": body.model_version,
+        "source": "camera",
+        "device_id": body.device_id,
     }
     try:
         result = apply_event(db, payload)

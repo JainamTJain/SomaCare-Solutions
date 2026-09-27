@@ -4,9 +4,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import numpy as np
+import pytest
 
+from edge.capture.rtsp import RtspBabyMonitor
 from edge.demo import _pose, scripted_events
 from edge.emit import post_event
+from edge.pipeline.home import Monitor, MonitorState, tick_monitor
 from edge.pipeline.position_rules import classify_keypoints
 from edge.pipeline.rules import SignalState, frame_displacement, step_signals
 from edge.pipeline.run import observe
@@ -90,6 +93,103 @@ def test_observe_discards_frame(tmp_path, monkeypatch):
         smoother=PositionSmoother(),
         frame=frame,
     )
+    assert list(Path(tmp_path).iterdir()) == []
+
+
+def test_rtsp_url_stays_local_and_video_only():
+    with pytest.raises(ValueError):
+        RtspBabyMonitor("http://192.168.1.20/stream")
+    with pytest.raises(ValueError):
+        RtspBabyMonitor("rtsp://user:pass@tplinkcloud.com/stream1")
+    seen = []
+
+    class Capture:
+        def __init__(self):
+            self.released = False
+
+        def read(self):
+            return True, np.zeros((8, 8), dtype=np.uint8)
+
+        def release(self):
+            self.released = True
+
+    capture = Capture()
+
+    def opener(url):
+        seen.append(url)
+        return capture
+
+    camera = RtspBabyMonitor("rtsp://192.168.1.40/stream1", opener=opener)
+    frame = camera.read()
+    assert frame.shape == (8, 8)
+    assert seen == ["rtsp://192.168.1.40/stream1"]
+    camera.close()
+    assert capture.released is True
+
+
+def test_six_baby_monitors_emit_events_and_write_nothing(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    gray = np.full((24, 24), 40, dtype=np.uint8)
+    color = np.zeros((24, 24, 3), dtype=np.uint8)
+    color[:, :] = (0, 0, 200)
+    moment = datetime(2026, 9, 27, tzinfo=UTC)
+    monitors = [
+        Monitor(
+            device_id=f"baby-monitor-{room}",
+            room_id=f"room-{room}",
+            resident_id=f"resident-{room}",
+            rtsp_url=f"rtsp://192.168.1.{room}/stream1",
+        )
+        for room in range(1, 7)
+    ]
+    states = {monitor.device_id: MonitorState(smoother=PositionSmoother(hold_s=0)) for monitor in monitors}
+    pose = _pose("back")
+    for monitor in monitors:
+        tick_monitor(
+            monitor,
+            states[monitor.device_id],
+            frame=gray,
+            ts=moment,
+            keypoints=pose,
+            persons_in_zone=1,
+            latency_ms=40,
+        )
+        events = tick_monitor(
+            monitor,
+            states[monitor.device_id],
+            frame=gray,
+            ts=moment,
+            keypoints=pose,
+            persons_in_zone=1,
+            latency_ms=40,
+        )
+        assert events[0]["kind"] == "position"
+        assert events[0]["source"] == "camera"
+        assert events[0]["device_id"] == monitor.device_id
+        assert events[0]["value"]["camera_spectrum"] == "infrared"
+        assert events[0]["value"]["mic"] == "off"
+        assert "frame" not in events[0]
+        assert "audio" not in events[0]
+    rejected = tick_monitor(
+        monitors[0],
+        states[monitors[0].device_id],
+        frame=color,
+        ts=moment + timedelta(seconds=1),
+        keypoints=pose,
+        persons_in_zone=1,
+    )
+    assert rejected[0]["kind"] == "heartbeat"
+    assert rejected[0]["value"]["camera_spectrum"] == "color_rejected"
+    silent = tick_monitor(
+        monitors[1],
+        states[monitors[1].device_id],
+        frame=None,
+        ts=moment + timedelta(seconds=120),
+        keypoints=None,
+        persons_in_zone=0,
+    )
+    assert silent[0]["kind"] == "device_offline"
+    assert silent[0]["source"] == "camera"
     assert list(Path(tmp_path).iterdir()) == []
 
 

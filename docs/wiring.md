@@ -10,9 +10,11 @@ Sorety does not add a second chart, a second schedule, or a second set of mornin
 
 ## What is added in the building
 
-One near-infrared camera per bed, about 850 nm, aimed from the foot of the bed toward the head. Power it with the hall's existing PoE switch. No microphone. No network video recorder. Frames are read in memory on a small computer in the corridor closet (one box can cover the hall) and then dropped. Only an event leaves the room: position, confidence, and the rule version `position-v0.0.0-rules`.
+One cheap infrared baby monitor per bed, in the class of a Tapo C210 (about $18–25), aimed from the foot of the bed toward the torso. There is no bed sensor. One shared computer in the home reads each camera over local RTSP at about one frame a second. The microphone stays off. Cloud recording stays off. The camera's internet is blocked at the router. An in-room camera needs written consent or a waiver.
 
-A color webcam is rejected. The edge box measures color in the frame. If the picture has chroma, it does not classify position and it does not pretend to be a night camera. SLP has no near-infrared night images, so a night claim waits on consented team recordings. Those recordings are not in this repo.
+Frames are classified in memory by the shoulder-hip rule (`position-v0.0.0-rules`) and then dropped. That rule is not a language model and it is not trained on SLP. Only an event leaves the computer: position, confidence, the camera id, and that rule version. A color frame is rejected, so a hallway webcam is not treated as the night camera. If the computer hears nothing from a camera for 120 seconds, it marks that monitor offline and the nurse's schedule is used. A frame below the confidence gate is logged and does not reset the pressure timer.
+
+A real Tapo was not connected in this repo, and a 72-hour soak was not run. The engineer board shows the checklist and the per-camera status from events, not from stored video.
 
 The phone on the CNA's pocket is the screen. It shows the next person, the infrared position as a moving figure (not a video), the morning chart, and the lines already written into the record. Confirmed turns and changes are the documentation. There is no second note to file for a routine turn the camera saw.
 

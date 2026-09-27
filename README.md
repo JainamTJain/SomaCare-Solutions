@@ -2,7 +2,7 @@
 
 Camera-verified turning and continence rounds. Nurses set every limit. CNAs log nothing for routine care. The care engine is rules and statistical models. It does not call a language model to score, schedule, or alert.
 
-The phone app is named Sorety. The shift can be dropped onto Google Calendar, the night camera has to be infrared, and the summary shows minutes the CNA did not walk. How that sits on a real hall is in `docs/wiring.md`.
+The phone app is named Sorety. Each bed uses a cheap infrared baby monitor. One shared computer runs the shoulder-hip rule on those frames and throws the frames away. The shift can be dropped onto Google Calendar, and the summary shows minutes the CNA did not walk. How that sits on a real hall is in `docs/wiring.md`.
 
 ## Run it locally
 
@@ -37,7 +37,7 @@ cd apps/nurse && npm install && npm run dev
 | Riley Chen | Engineer | 9130 | English |
 | Helen Cho | Director | 6204 | English |
 
-Maria is assigned to the hall. Elena Alvarez is already inside her turn window, with a how-to card. Sam has a draft night limit for Mei Lin. Devon is not assigned, so the API refuses him Elena's card. Riley opens the engineer board (live position, area scores, incontinence probability, visual-check uncertainty). Helen opens the director board (hours saved, and pressure-ulcer prevention left unestimated).
+Maria is assigned to the hall. Elena Alvarez is already inside her turn window, with a how-to card. Sam has a draft night limit for Mei Lin. Devon is not assigned, so the API refuses him Elena's card. Riley opens the engineer board (live position, area scores, incontinence probability, visual-check uncertainty, and one row per infrared baby monitor). Helen opens the director board (hours saved, and pressure-ulcer prevention left unestimated).
 
 Edge token for `POST /events`: `edge-demo-token` (override with `TURNWISE_EDGE_TOKEN`).
 

@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from turnwise.engine.budget import ALL_AREAS
-from turnwise.models import Alert, Resident, ResidentState, Task
+from turnwise.models import Alert, Device, Event, Resident, ResidentState, Task
 
 UTC = timezone.utc
 
@@ -225,6 +225,132 @@ def test_rule_extractor_requires_nurse_approval(client):
     )
 
 
+def test_uncertain_baby_monitor_frame_does_not_reset_the_timer(client):
+    edge = {"Authorization": "Bearer edge-test-token"}
+    token, _ = _login(client, "Maria Santos")
+    shift = client.get("/me/shift", headers=_auth(token)).json()
+    elena = next(item for item in shift["items"] if item["resident"]["preferred_name"] == "Elena Alvarez")
+    resident_id = elena["resident"]["id"]
+    from turnwise.db import SessionLocal
+
+    db = SessionLocal()
+    resident = db.get(Resident, resident_id)
+    room_id = resident.room_id
+    before = db.get(ResidentState, resident_id)
+    assert before.position == "back"
+    assert before.relief_since["sacrum"] is None
+    open_before = (
+        db.query(Alert)
+        .join(Task, Task.id == Alert.task_id)
+        .filter(Task.resident_id == resident_id, Alert.status.in_(["sent", "accepted", "passed", "escalated"]))
+        .count()
+    )
+    db.close()
+    moment = datetime.now(UTC).isoformat()
+    low = client.post(
+        "/events",
+        headers=edge,
+        json={
+            "room_id": room_id,
+            "resident_id": resident_id,
+            "ts": moment,
+            "kind": "position",
+            "source": "camera",
+            "device_id": "baby-monitor-12",
+            "value": {"position": "left", "persons_in_zone": 2},
+            "confidence": 0.4,
+            "model_version": "position-v0.0.0-rules",
+        },
+    )
+    assert low.status_code == 200, low.text
+    assert low.json()["resolved_alerts"] == 0
+    assert low.json()["position"] == "back"
+    vitals = client.post(
+        "/events",
+        headers=edge,
+        json={
+            "room_id": room_id,
+            "resident_id": resident_id,
+            "ts": moment,
+            "kind": "night_vitals",
+            "source": "camera",
+            "device_id": "baby-monitor-12",
+            "value": {"note": "not a reposition"},
+            "model_version": "position-v0.0.0-rules",
+        },
+    )
+    assert vitals.status_code == 200, vitals.text
+    assert vitals.json()["resolved_alerts"] == 0
+    db = SessionLocal()
+    state = db.get(ResidentState, resident_id)
+    assert state.position == "back"
+    assert state.relief_since["sacrum"] is None
+    assert state.camera_online is True
+    event = (
+        db.query(Event)
+        .filter(Event.resident_id == resident_id, Event.kind == "position")
+        .order_by(Event.id.desc())
+        .first()
+    )
+    assert event.source == "camera"
+    assert event.device_id == "baby-monitor-12"
+    assert event.value["fusion"] == "uncertain"
+    device = db.get(Device, "baby-monitor-12")
+    assert device.last_seen is not None
+    assert device.active is True
+    assert device.config["fps"] is None or "fps" not in device.config or device.config.get("spectrum") != "offline"
+    open_after = (
+        db.query(Alert)
+        .join(Task, Task.id == Alert.task_id)
+        .filter(Task.resident_id == resident_id, Alert.status.in_(["sent", "accepted", "passed", "escalated"]))
+        .count()
+    )
+    assert open_after == open_before
+    db.close()
+    sure = client.post(
+        "/events",
+        headers=edge,
+        json={
+            "room_id": room_id,
+            "resident_id": resident_id,
+            "ts": moment,
+            "kind": "position",
+            "source": "camera",
+            "device_id": "baby-monitor-12",
+            "value": {"position": "right", "persons_in_zone": 2, "fps": 1.0, "latency_ms": 90},
+            "confidence": 0.91,
+            "model_version": "position-v0.0.0-rules",
+        },
+    )
+    assert sure.status_code == 200, sure.text
+    assert sure.json()["resolved_alerts"] >= 1
+    assert sure.json()["position"] == "right"
+    offline = client.post(
+        "/events",
+        headers=edge,
+        json={
+            "room_id": room_id,
+            "resident_id": resident_id,
+            "ts": moment,
+            "kind": "device_offline",
+            "source": "camera",
+            "device_id": "baby-monitor-12",
+            "value": {"reason": "no_frame", "silence_s": 120},
+            "model_version": "position-v0.0.0-rules",
+        },
+    )
+    assert offline.status_code == 200, offline.text
+    db = SessionLocal()
+    state = db.get(ResidentState, resident_id)
+    assert state.camera_online is False
+    assert state.camera_spectrum == "offline"
+    device = db.get(Device, "baby-monitor-12")
+    assert device.active is False
+    assert device.config["spectrum"] == "offline"
+    assert device.config["fps"] == 1.0
+    db.close()
+
+
 def test_missing_token_is_rejected(client):
     assert client.get("/me/shift").status_code == 401
 
@@ -236,6 +362,23 @@ def test_engineer_board_is_raw_and_director_does_not_invent_ulcers(client):
     engineer, _ = _login(client, "Riley Chen")
     board = client.get("/engineer/board", headers=_auth(engineer)).json()
     assert board["position_model"] == "position-v0.0.0-rules"
+    assert board["sensing"]["default"] == "infrared baby monitor"
+    assert board["sensing"]["frames_leave_home"] is False
+    cameras = board["cameras"]
+    assert len(cameras) == 10
+    assert {row["kind"] for row in cameras} == {"camera"}
+    elena_cam = next(row for row in cameras if row["room"] == "12")
+    assert elena_cam["online"] is True
+    assert elena_cam["infrared"] is True
+    assert elena_cam["mic"] == "off"
+    assert elena_cam["cloud"] == "off"
+    assert elena_cam["uncertainty_pct"] == 8
+    carmen_cam = next(row for row in cameras if row["room"] == "28")
+    assert carmen_cam["online"] is False
+    assert carmen_cam["infrared"] is False
+    step_ids = [step["id"] for step in board["install"]["steps"]]
+    assert {"consent", "mic", "cloud", "internet", "mount", "pair", "night"} <= set(step_ids)
+    assert "bed" not in " ".join(step_ids)
     elena = next(row for row in board["residents"] if row["name"] == "Elena Alvarez")
     assert elena["camera_spectrum"] == "infrared"
     assert 0 <= elena["uncertainty_pct"] <= 100

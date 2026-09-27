@@ -234,6 +234,7 @@ textarea {
   padding: 28px 22px 64px;
 }
 .desk h1 { font-size: 2.4rem; }
+.desk h2 { font-size: 1.35rem; font-weight: 500; margin: 28px 0 8px; }
 .metrics {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
