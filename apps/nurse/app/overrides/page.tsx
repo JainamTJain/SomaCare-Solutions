@@ -1,7 +1,7 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
+import { Nav } from "../../components/Nav";
 import { call, session } from "../../lib/api";
 
 export default function OverridesPage() {
@@ -15,12 +15,7 @@ export default function OverridesPage() {
   }, []);
   return (
     <main>
-      <nav>
-        <Link href="/plans">Plans</Link>
-        <Link href="/preferences">Preferences</Link>
-        <Link href="/residents">History</Link>
-        <Link href="/overrides">Overrides</Link>
-      </nav>
+      <Nav />
       <h1>Overrides</h1>
       <p className="muted">A lower floor than 60 minutes needs your name on it.</p>
       <article className="card">

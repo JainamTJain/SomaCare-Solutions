@@ -24,6 +24,7 @@ from turnwise.careflow import (
 from turnwise.config import EngineConfig, load_config
 from turnwise.daybook import time_saved
 from turnwise.engine.budget import ALL_AREAS
+from turnwise.consent import has_signed, monitoring_state, withhold_camera_fields, withhold_continence_prediction
 from turnwise.engine.gate1 import live_status
 from turnwise.engine.budget import limit as area_limit
 from turnwise.engine.risk_rules import extra_risk_steps
@@ -114,8 +115,9 @@ def hall_rows(db: Session, now: datetime, config: EngineConfig | None = None) ->
         detail = (continence.detail or {}) if continence else {}
         wet = detail.get("wet_probability")
         threshold = plan.continence_threshold if plan else None
-        rows.append(
-            {
+        if not has_signed(db, resident.id, "continence_tracking"):
+            wet = None
+        row = {
                 "resident_id": resident.id,
                 "name": resident.preferred_name,
                 "room": room.label if room else "",
@@ -162,8 +164,13 @@ def hall_rows(db: Session, now: datetime, config: EngineConfig | None = None) ->
                     "plan_version": open_turn.plan_version,
                     "model_version": open_turn.model_version,
                 },
-            }
-        )
+        }
+        if not has_signed(db, resident.id, "position_monitoring"):
+            row = withhold_camera_fields(row)
+        if not has_signed(db, resident.id, "continence_tracking"):
+            row["continence"] = withhold_continence_prediction(row["continence"])
+        row["monitoring"] = monitoring_state(db, resident.id)
+        rows.append(row)
     rows.sort(key=lambda row: row["room"])
     return rows
 
@@ -214,10 +221,11 @@ def camera_table(db: Session, now: datetime) -> list[dict]:
         resident = db.get(Resident, device.resident_id) if device.resident_id else None
         state = db.get(ResidentState, device.resident_id) if device.resident_id else None
         stored = device.config or {}
-        spectrum = stored.get("spectrum") or (state.camera_spectrum if state else "offline")
+        allowed = bool(device.resident_id) and has_signed(db, device.resident_id, "position_monitoring")
+        spectrum = stored.get("spectrum") or ((state.camera_spectrum if state else None) if allowed else None) or "offline"
         seen = _aware(device.last_seen) if device.last_seen else None
         age = int((moment - seen).total_seconds()) if seen else None
-        confidence = state.confidence if state and state.confidence is not None else None
+        confidence = state.confidence if allowed and state and state.confidence is not None else None
         rows.append(
             {
                 "device_id": device.id,
@@ -233,8 +241,11 @@ def camera_table(db: Session, now: datetime) -> list[dict]:
                 "last_seen": seen.isoformat() if seen else None,
                 "seconds_since_seen": age,
                 "uncertainty_pct": round((1 - confidence) * 100) if confidence is not None else None,
+                "monitoring": "camera" if allowed else "schedule",
                 "mic": stored.get("mic"),
                 "cloud": stored.get("cloud"),
+                "simulated": bool(stored.get("simulated", True)),
+                "live": bool(stored.get("live", False)),
             }
         )
     rows.sort(key=lambda row: row["room"] or "")
@@ -295,9 +306,8 @@ def director_board(db: Session, now: datetime) -> dict:
     inside = [row for row in rows if row["inside_nurse_limit"]]
     over = [row for row in rows if row["worst_ratio"] is not None and row["worst_ratio"] >= 1]
     checks_pass = [row for row in rows if row["visual_check"]["would_verify"]]
-    mean_uncertainty = (
-        round(sum(row["uncertainty_pct"] for row in rows) / len(rows), 1) if rows else None
-    )
+    known_uncertainty = [row["uncertainty_pct"] for row in rows if row.get("uncertainty_pct") is not None]
+    mean_uncertainty = round(sum(known_uncertainty) / len(known_uncertainty), 1) if known_uncertainty else None
     return {
         "generated_at": now.isoformat(),
         "facility": "Harbor House",

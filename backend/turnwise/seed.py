@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy.orm import Session
 
 from turnwise.auth import hash_pin
+from turnwise.consent import fill_form, form_version
 from turnwise.daybook import morning_chart_time
 from turnwise.engine.budget import ALL_AREAS
 from turnwise.models import (
@@ -15,6 +16,7 @@ from turnwise.models import (
     Assignment,
     BradenAssessment,
     ContinenceObs,
+    ConsentRecord,
     Device,
     Event,
     Facility,
@@ -475,6 +477,8 @@ def seed_if_empty(db: Session) -> None:
                     "latency_ms": None if offline else 180,
                     "mic": "off",
                     "cloud": "off",
+                    "simulated": True,
+                    "live": False,
                     "rtsp": f"rtsp://192.168.1.{20 + index}/stream1",
                 },
             )
@@ -622,4 +626,23 @@ def seed_if_empty(db: Session) -> None:
             updated_at=now,
         )
     )
+    # Demo signatures so the seeded hall can show camera readings. They are
+    # not a power of attorney. Skin capture stays unsigned.
+    for resident in db.query(Resident).all():
+        for scope in ("position_monitoring", "continence_tracking"):
+            db.add(
+                ConsentRecord(
+                    resident_id=resident.id,
+                    scope=scope,
+                    status="signed",
+                    explanation_shown=fill_form(scope, resident.preferred_name),
+                    form_version=form_version(),
+                    requested_by=nurse.id,
+                    requested_at=now,
+                    sent_to="in_person",
+                    sent_at=now,
+                    signed_at=now,
+                    signature_ref="demo-seed",
+                )
+            )
     db.commit()

@@ -39,8 +39,10 @@ export default function ResidentPage() {
     <Shell>
       <p className="kicker">{resident.room}</p>
       <h1>{resident.preferred_name}</h1>
-      <p className="muted">{t("card.inPosition", { count: card.minutes_in_position as number })}</p>
-      {!card.camera_online && <p className="banner">{t("shift.cameraOff")}</p>}
+      {(card.monitoring as { mode?: string } | undefined)?.mode !== "schedule" && (
+        <p className="muted">{t("card.inPosition", { count: card.minutes_in_position as number })}</p>
+      )}
+      {card.camera_online === false && <p className="banner">{t("shift.cameraOff")}</p>}
       <ResidentContext card={card} />
       <ul className="how">
         {lines.map((line) => (

@@ -1,7 +1,7 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
+import { Nav } from "../../components/Nav";
 import { call, session } from "../../lib/api";
 
 export default function ResidentsPage() {
@@ -14,12 +14,7 @@ export default function ResidentsPage() {
   }, []);
   return (
     <main>
-      <nav>
-        <Link href="/plans">Plans</Link>
-        <Link href="/preferences">Preferences</Link>
-        <Link href="/residents">History</Link>
-        <Link href="/overrides">Overrides</Link>
-      </nav>
+      <Nav />
       <h1>History</h1>
       <div className="grid">
         {rows.map((row) => (

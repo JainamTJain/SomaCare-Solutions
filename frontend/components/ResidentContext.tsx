@@ -8,6 +8,10 @@ export function ResidentContext({ card }: { card: Record<string, unknown> | null
   const t = useT();
   if (!card) return null;
   const lines = (card.chart_lines as ChartLine[]) || [];
+  const monitoring = card.monitoring as { mode?: string; label?: string } | undefined;
+  if (monitoring?.mode === "schedule") {
+    return <p className="banner">{monitoring.label || t("monitoring.schedule")}</p>;
+  }
   return (
     <>
       <p className="live">

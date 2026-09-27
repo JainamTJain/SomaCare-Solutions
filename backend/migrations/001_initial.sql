@@ -206,7 +206,9 @@ CREATE TABLE audit_log (
 CREATE TABLE staff_credential (
   staff_id UUID PRIMARY KEY REFERENCES staff,
   pin_hash TEXT,
-  pin_salt TEXT
+  pin_salt TEXT,
+  failed_attempts INT DEFAULT 0,
+  locked_until TIMESTAMPTZ
 );
 CREATE TABLE help_request (
   id UUID PRIMARY KEY,
@@ -251,7 +253,7 @@ CREATE TABLE ingest_batch (
 );
 CREATE TABLE device (
   id TEXT PRIMARY KEY,
-  kind TEXT CHECK (kind IN ('bed_sensor','vision_partner','vision_edge','camera')),
+  kind TEXT CHECK (kind IN ('bed_sensor','vision_partner','vision_edge','camera','skin_camera')),
   room_id UUID REFERENCES room,
   resident_id UUID REFERENCES resident,
   installed_at TIMESTAMPTZ,
@@ -264,4 +266,29 @@ CREATE TABLE home_install (
   home_name TEXT,
   steps JSONB,
   updated_at TIMESTAMPTZ
+);
+CREATE TABLE poa_contact (
+  id UUID PRIMARY KEY,
+  resident_id UUID REFERENCES resident,
+  full_name TEXT,
+  relationship TEXT,
+  email TEXT,
+  phone TEXT,
+  is_primary BOOLEAN DEFAULT FALSE
+);
+CREATE TABLE consent_record (
+  id UUID PRIMARY KEY,
+  resident_id UUID REFERENCES resident,
+  scope TEXT CHECK (scope IN ('position_monitoring','skin_capture','continence_tracking')),
+  status TEXT CHECK (status IN ('requested','sent','signed','declined','revoked')),
+  explanation_shown TEXT,
+  form_version INT,
+  requested_by UUID REFERENCES staff,
+  requested_at TIMESTAMPTZ,
+  sent_to TEXT,
+  sent_at TIMESTAMPTZ,
+  signed_at TIMESTAMPTZ,
+  signature_ref TEXT,
+  revoked_at TIMESTAMPTZ,
+  revoked_reason TEXT
 );

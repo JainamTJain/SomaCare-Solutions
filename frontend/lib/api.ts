@@ -12,8 +12,9 @@ export type Visit = {
   why: Record<string, unknown>;
   how_to: HowTo[];
   two_person: boolean;
-  camera_online: boolean;
-  position: string;
+  camera_online: boolean | null;
+  position: string | null;
+  monitoring?: { mode?: string; label?: string | null };
   alert_id: string | null;
   settled: boolean;
 };

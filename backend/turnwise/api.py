@@ -7,6 +7,7 @@ import json
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -25,6 +26,7 @@ from turnwise.careflow import (
     utcnow,
 )
 from turnwise.config import load_config
+from turnwise.consent import has_signed, request_consent, revoke_consent, send_consent, sign_consent, simple_pdf
 from turnwise.engine.preferences import extract_with_fallback
 from turnwise.ingest import export_care, import_records
 from turnwise.models import (
@@ -32,6 +34,9 @@ from turnwise.models import (
     AuditLog,
     HelpRequest,
     HandoffNote,
+    ConsentRecord,
+    Device,
+    Facility,
     Plan,
     Preference,
     Resident,
@@ -52,6 +57,20 @@ router = APIRouter()
 class LoginIn(BaseModel):
     staff_id: str
     pin: str
+
+
+class ConsentRequestIn(BaseModel):
+    resident_id: str
+    scope: str
+
+
+class ConsentSignIn(BaseModel):
+    signer_name: str
+    relationship: str = "resident"
+
+
+class ConsentRevokeIn(BaseModel):
+    reason: str
 
 
 class EventIn(BaseModel):
@@ -163,8 +182,23 @@ def roster(db: Session = Depends(get_db)):
 def login(body: LoginIn, db: Session = Depends(get_db)):
     person = db.get(Staff, body.staff_id)
     credential = db.get(StaffCredential, body.staff_id) if person else None
+    now = datetime.now(timezone.utc)
+    locked = credential.locked_until if credential is not None else None
+    if locked is not None and locked.tzinfo is None:
+        locked = locked.replace(tzinfo=timezone.utc)
+    if locked is not None and locked > now:
+        raise HTTPException(status_code=429, detail="PIN locked. Try again in fifteen minutes.")
     if person is None or credential is None or not verify_pin(body.pin, credential):
+        if credential is not None:
+            credential.failed_attempts = int(credential.failed_attempts or 0) + 1
+            if credential.failed_attempts >= 5:
+                credential.locked_until = now + timedelta(minutes=15)
+                db.commit()
+                raise HTTPException(status_code=429, detail="PIN locked. Try again in fifteen minutes.")
+            db.commit()
         raise HTTPException(status_code=401, detail="name or PIN does not match")
+    credential.failed_attempts = 0
+    credential.locked_until = None
     db.add(
         AuditLog(
             staff_id=person.id,
@@ -184,6 +218,159 @@ def login(body: LoginIn, db: Session = Depends(get_db)):
             "ui_language": person.ui_language,
         },
     }
+
+
+def _consent_row(row: ConsentRecord) -> dict:
+    return {
+        "id": row.id,
+        "scope": row.scope,
+        "status": row.status,
+        "form_version": row.form_version,
+        "explanation_shown": row.explanation_shown,
+        "sent_to": row.sent_to,
+        "signature_ref": row.signature_ref,
+        "signed_at": row.signed_at.isoformat() if row.signed_at else None,
+        "revoked_at": row.revoked_at.isoformat() if row.revoked_at else None,
+    }
+
+
+@router.get("/consent")
+def consent_board(
+    principal: Principal = Depends(require_roles("nurse", "charge_nurse", "admin")),
+    db: Session = Depends(get_db),
+):
+    del principal
+    residents = db.query(Resident).order_by(Resident.preferred_name).all()
+    rows = []
+    for resident in residents:
+        records = (
+            db.query(ConsentRecord)
+            .filter(ConsentRecord.resident_id == resident.id)
+            .order_by(ConsentRecord.requested_at.desc())
+            .all()
+        )
+        scopes = {}
+        for scope in ("position_monitoring", "skin_capture", "continence_tracking"):
+            same = [record for record in records if record.scope == scope]
+            signed = next((record for record in same if record.status == "signed" and record.revoked_at is None), None)
+            match = signed or (same[0] if same else None)
+            scopes[scope] = _consent_row(match) if match else {"id": None, "scope": scope, "status": "none"}
+        rows.append({"resident_id": resident.id, "name": resident.preferred_name, "scopes": scopes})
+    return {"residents": rows, "outbound": load_config().features.consent_outbound}
+
+
+@router.post("/consent/request")
+def consent_request(
+    body: ConsentRequestIn,
+    principal: Principal = Depends(require_roles("nurse", "charge_nurse", "admin")),
+    db: Session = Depends(get_db),
+):
+    resident = db.get(Resident, body.resident_id)
+    if resident is None:
+        raise HTTPException(status_code=404, detail="resident not found")
+    try:
+        row = request_consent(db, resident=resident, scope=body.scope, staff_id=principal.id, now=utcnow())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    db.commit()
+    return _consent_row(row)
+
+
+@router.post("/consent/{record_id}/send")
+def consent_send(
+    record_id: str,
+    principal: Principal = Depends(require_roles("nurse", "charge_nurse", "admin")),
+    db: Session = Depends(get_db),
+):
+    del principal
+    row = db.get(ConsentRecord, record_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="consent not found")
+    try:
+        result = send_consent(db, row, now=utcnow(), outbound=load_config().features.consent_outbound)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    db.commit()
+    return result
+
+
+@router.post("/consent/{record_id}/sign")
+def consent_sign(
+    record_id: str,
+    body: ConsentSignIn,
+    principal: Principal = Depends(require_roles("nurse", "charge_nurse", "admin")),
+    db: Session = Depends(get_db),
+):
+    del principal
+    row = db.get(ConsentRecord, record_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="consent not found")
+    try:
+        sign_consent(db, row, signer_name=body.signer_name, relationship=body.relationship, now=utcnow())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    db.commit()
+    return _consent_row(row)
+
+
+@router.post("/consent/{record_id}/revoke")
+def consent_revoke(
+    record_id: str,
+    body: ConsentRevokeIn,
+    principal: Principal = Depends(require_roles("nurse", "charge_nurse", "admin")),
+    db: Session = Depends(get_db),
+):
+    del principal
+    row = db.get(ConsentRecord, record_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="consent not found")
+    try:
+        revoke_consent(db, row, reason=body.reason, now=utcnow())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    db.commit()
+    return _consent_row(row)
+
+
+@router.get("/consent/{record_id}/form")
+def consent_form(
+    record_id: str,
+    principal: Principal = Depends(require_roles("nurse", "charge_nurse", "admin")),
+    db: Session = Depends(get_db),
+):
+    del principal
+    row = db.get(ConsentRecord, record_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="consent not found")
+    return Response(content=simple_pdf(row.explanation_shown), media_type="application/pdf")
+
+
+@router.get("/setup/status")
+def setup_status(
+    principal: Principal = Depends(require_roles("nurse", "charge_nurse", "admin")),
+    db: Session = Depends(get_db),
+):
+    del principal
+    facility = db.query(Facility).first()
+    residents = db.query(Resident).count()
+    rooms = db.query(Room).count()
+    cameras_on = db.query(Device).filter(Device.kind == "camera", Device.active.is_(True)).count()
+    staff = db.query(Staff).count()
+    scopes = 3
+    signed = (
+        db.query(ConsentRecord)
+        .filter(ConsentRecord.status == "signed", ConsentRecord.revoked_at.is_(None))
+        .count()
+    )
+    needed = residents * scopes
+    steps = [
+        {"id": "facility", "done": facility is not None, "label": facility.name if facility else ""},
+        {"id": "rooms", "done": rooms > 0 and cameras_on == rooms, "have": rooms, "cameras_online": cameras_on},
+        {"id": "residents", "done": residents > 0, "have": residents},
+        {"id": "staff", "done": staff > 0, "have": staff},
+        {"id": "consent", "done": residents > 0 and signed >= needed, "signed": signed, "needed": needed},
+    ]
+    return {"complete": all(step["done"] for step in steps), "steps": steps}
 
 
 @router.post("/events")
@@ -757,6 +944,10 @@ async def skin_capture(
 ):
     if source not in {"phone", "room"}:
         raise HTTPException(status_code=400, detail="source must be phone or room")
+    if db.get(Resident, resident_id) is None:
+        raise HTTPException(status_code=404, detail="resident not found")
+    if not has_signed(db, resident_id, "skin_capture"):
+        raise HTTPException(status_code=403, detail="skin capture consent is not signed")
     if not principal.is_edge:
         _guard_resident(db, principal, resident_id)
     raw = await image.read()
@@ -774,6 +965,8 @@ async def skin_capture(
         model_version=result["model_version"],
         shown_to_staff=False,
     )
+    # TODO: leave shown_to_staff false until pilot data clears sensitivity >= 0.90,
+    # specificity >= 0.80, and a skin-tone gap within 0.05. Do not flip it in code.
     if capture.shown_to_staff:
         raise RuntimeError("skin model output cannot be shown before the acceptance gate")
     db.add(capture)
@@ -782,7 +975,6 @@ async def skin_capture(
         "id": capture.id,
         "shown_to_staff": False,
         "quality_ok": result["ok"],
-        "model_flag": capture.model_flag,
         "model_version": capture.model_version,
     }
 

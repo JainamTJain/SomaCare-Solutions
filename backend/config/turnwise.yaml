@@ -59,3 +59,5 @@ features:
   llm_preference_extract: false
   llm_note_translation: false
   lab_debug_frames: false
+  # Email and SMS consent links stay off. The fallback is a printable form.
+  consent_outbound: false
