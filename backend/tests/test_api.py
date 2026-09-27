@@ -32,6 +32,8 @@ def _login(client, role_name):
         "Devon Brooks": "8024",
         "Grace Adeyemi": "5913",
         "Sam Patel": "4470",
+        "Riley Chen": "9130",
+        "Helen Cho": "6204",
     }
     response = client.post("/auth/login", json={"staff_id": person["id"], "pin": pins[role_name]})
     assert response.status_code == 200, response.text
@@ -47,7 +49,9 @@ def test_health_and_seed(client):
     assert health.status_code == 200
     assert health.json()["pilot_mode"] is True
     roster = client.get("/auth/roster").json()["staff"]
-    assert len(roster) == 5
+    assert len(roster) == 7
+    names = {row["display_name"] for row in roster}
+    assert {"Riley Chen", "Helen Cho"} <= names
 
 
 def test_cna_shift_is_ordered_and_traced(client):
@@ -223,6 +227,34 @@ def test_rule_extractor_requires_nurse_approval(client):
 
 def test_missing_token_is_rejected(client):
     assert client.get("/me/shift").status_code == 401
+
+
+def test_engineer_board_is_raw_and_director_does_not_invent_ulcers(client):
+    maria, _ = _login(client, "Maria Santos")
+    assert client.get("/engineer/board", headers=_auth(maria)).status_code == 403
+    assert client.get("/director/board", headers=_auth(maria)).status_code == 403
+    engineer, _ = _login(client, "Riley Chen")
+    board = client.get("/engineer/board", headers=_auth(engineer)).json()
+    assert board["position_model"] == "position-v0.0.0-rules"
+    elena = next(row for row in board["residents"] if row["name"] == "Elena Alvarez")
+    assert elena["camera_spectrum"] == "infrared"
+    assert 0 <= elena["uncertainty_pct"] <= 100
+    assert elena["confidence_pct"] + elena["uncertainty_pct"] == 100
+    assert elena["areas"]
+    assert "ratio" in elena["areas"][0]
+    assert "wet_probability" in elena["continence"]
+    assert "would_verify" in elena["visual_check"]
+    assert "gate_pct" in elena["visual_check"]
+    director, _ = _login(client, "Helen Cho")
+    summary = client.get("/director/board", headers=_auth(director)).json()
+    assert summary["pressure_injury"]["ulcers_prevented"] is None
+    assert summary["pressure_injury"]["new_injuries_recorded_this_shift"] == 0
+    saved = summary["time_saved"]
+    assert saved["total_minutes"] == (
+        saved["turning"]["minutes"] + saved["incontinence"]["minutes"] + saved["visual_checks"]["minutes"]
+    )
+    assert saved["visual_checks"]["minutes"] >= 16
+    assert summary["pressure_injury"]["residents_inside_nurse_limit"] >= 1
 
 
 def test_calendar_and_time_saved_use_the_same_shift(client):

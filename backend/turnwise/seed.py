@@ -267,6 +267,8 @@ STAFF = [
     ("Devon Brooks", "cna", "en", "8024"),
     ("Grace Adeyemi", "charge_nurse", "en", "5913"),
     ("Sam Patel", "nurse", "en", "4470"),
+    ("Riley Chen", "engineer", "en", "9130"),
+    ("Helen Cho", "director", "en", "6204"),
 ]
 
 

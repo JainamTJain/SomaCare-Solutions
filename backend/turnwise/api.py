@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from turnwise.auth import Principal, get_db, get_principal, issue_token, require_roles, verify_pin
+from turnwise.boards import director_board, engineer_board
 from turnwise.daybook import shift_ics
 from turnwise.careflow import (
     apply_event,
@@ -250,6 +251,24 @@ def export(
     from fastapi.responses import PlainTextResponse
 
     return PlainTextResponse(export_care(db), media_type="text/csv")
+
+
+@router.get("/engineer/board")
+def engineer_view(
+    principal: Principal = Depends(require_roles("engineer", "admin")),
+    db: Session = Depends(get_db),
+):
+    del principal
+    return engineer_board(db, utcnow())
+
+
+@router.get("/director/board")
+def director_view(
+    principal: Principal = Depends(require_roles("director", "admin")),
+    db: Session = Depends(get_db),
+):
+    del principal
+    return director_board(db, utcnow())
 
 
 @router.get("/me/shift")

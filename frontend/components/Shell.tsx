@@ -20,7 +20,10 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [ready, setReady] = useState(false);
   useEffect(() => {
-    if (!loadSession()) router.replace("/");
+    const session = loadSession();
+    if (!session) router.replace("/");
+    else if (session.staff.role === "engineer") router.replace("/engineer");
+    else if (session.staff.role === "director") router.replace("/director");
     else setReady(true);
   }, [router]);
   if (!ready) return <main className="phone" />;

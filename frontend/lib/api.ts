@@ -56,6 +56,8 @@ export const api = {
     request("/auth/login", null, { method: "POST", body: JSON.stringify({ staff_id, pin }) }),
   shift: (token: string) => request("/me/shift", token) as Promise<Shift>,
   calendar: (token: string) => request("/me/shift.ics", token) as Promise<string>,
+  engineer: (token: string) => request("/engineer/board", token),
+  director: (token: string) => request("/director/board", token),
   card: (token: string, id: string) => request(`/residents/${id}/card`, token),
   history: (token: string, id: string) => request(`/residents/${id}/history?days=7`, token),
   continence: (token: string, id: string) => request(`/residents/${id}/continence`, token),

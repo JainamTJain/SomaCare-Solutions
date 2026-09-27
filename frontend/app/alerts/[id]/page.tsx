@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { ResidentContext } from "../../../components/ResidentContext";
 import { Shell } from "../../../components/Shell";
 import { HowTo, Shift, api } from "../../../lib/api";
 import { renderLine, useT } from "../../../lib/i18n";
@@ -13,6 +14,7 @@ export default function AlertPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const [shift, setShift] = useState<Shift | null>(null);
+  const [card, setCard] = useState<Record<string, unknown> | null>(null);
   const [note, setNote] = useState("");
 
   useEffect(() => {
@@ -22,6 +24,15 @@ export default function AlertPage() {
   }, []);
 
   const item = shift?.items.find((row) => row.alert_id === params.id);
+  useEffect(() => {
+    const session = loadSession();
+    if (!session || !item) return;
+    const pull = () => api.card(session.token, item.resident.id).then(setCard);
+    pull();
+    const timer = window.setInterval(pull, 2000);
+    return () => window.clearInterval(timer);
+  }, [item?.resident.id]);
+
   async function act(kind: "accept" | "pass" | "confirm") {
     const session = loadSession();
     if (!session) return;
@@ -43,6 +54,7 @@ export default function AlertPage() {
     <Shell>
       <p className="kicker">{item.resident.room}</p>
       <h1>{item.resident.preferred_name}</h1>
+      <ResidentContext card={card} />
       <div className="chips" style={{ margin: "12px 0" }}>
         {item.tasks.map((task) => (
           <span key={task} className="chip mark">
