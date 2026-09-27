@@ -19,7 +19,9 @@ export default function LoginPage() {
 
   useEffect(() => {
     api.roster().then((body) => {
-      const staff = (body.staff as Person[]).filter((person) => person.role === "cna" || person.role === "charge_nurse");
+      const staff = (body.staff as Person[]).filter((person) =>
+        ["cna", "charge_nurse", "engineer", "director"].includes(person.role)
+      );
       setPeople(staff);
     });
   }, []);
@@ -30,7 +32,9 @@ export default function LoginPage() {
       const session = await api.login(picked.id, nextPin);
       saveSession(session);
       setLang((session.staff.ui_language || "en") as "en" | "es" | "tl");
-      router.push("/crash");
+      if (session.staff.role === "engineer") router.push("/engineer");
+      else if (session.staff.role === "director") router.push("/director");
+      else router.push("/crash");
     } catch {
       setError(t("login.bad"));
       setPin("");
@@ -60,7 +64,11 @@ export default function LoginPage() {
             }}
           >
             <strong>{person.display_name}</strong>
-            <div className="muted">{person.ui_language.toUpperCase()}</div>
+            <div className="muted">
+              {person.role === "cna" || person.role === "charge_nurse"
+                ? person.ui_language.toUpperCase()
+                : person.role}
+            </div>
           </button>
         ))}
       </div>

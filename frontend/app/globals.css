@@ -208,6 +208,8 @@ textarea {
 .pose-sitting { transform: translateY(-28px) scaleX(0.72) scaleY(1.7); }
 .pose-out_of_bed { transform: translateX(90px); opacity: 0.35; }
 .pose-unknown { opacity: 0.4; }
+.bed-compact { height: 72px; margin: 0 0 6px; border-radius: 14px; }
+.bed-compact .body { width: 56px; height: 18px; margin-left: -28px; margin-top: -9px; }
 .live {
   display: inline-flex;
   align-items: center;
@@ -224,4 +226,56 @@ textarea {
 @keyframes pulse {
   0%, 100% { opacity: 0.45; }
   50% { opacity: 1; }
+}
+
+.desk {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 28px 22px 64px;
+}
+.desk h1 { font-size: 2.4rem; }
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  margin: 18px 0;
+}
+.metric {
+  background: var(--bg-raise);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 16px;
+}
+.metric b {
+  display: block;
+  font-family: Palatino, Georgia, serif;
+  font-size: 2rem;
+  font-weight: 500;
+  margin: 6px 0;
+}
+.raw {
+  width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.92rem;
+}
+.raw th, .raw td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+.raw th { color: var(--muted); font-weight: 550; }
+.meter { height: 8px; background: var(--chip); border-radius: 99px; overflow: hidden; min-width: 88px; }
+.meter span { display: block; height: 100%; background: var(--brass); }
+.meter.hot span { background: var(--clay); }
+.mono {
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+  white-space: pre-wrap;
+  background: #0d0c0a;
+  border-radius: 12px;
+  padding: 12px;
+  color: #d9d0c1;
 }

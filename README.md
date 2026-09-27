@@ -34,8 +34,10 @@ cd apps/nurse && npm install && npm run dev
 | Devon Brooks | CNA | 8024 | English |
 | Grace Adeyemi | Charge nurse | 5913 | English |
 | Sam Patel | Nurse | 4470 | English |
+| Riley Chen | Engineer | 9130 | English |
+| Helen Cho | Director | 6204 | English |
 
-Maria is assigned to the hall. Elena Alvarez is already inside her turn window, with a how-to card. Sam has a draft night limit for Mei Lin. Devon is not assigned, so the API refuses him Elena's card.
+Maria is assigned to the hall. Elena Alvarez is already inside her turn window, with a how-to card. Sam has a draft night limit for Mei Lin. Devon is not assigned, so the API refuses him Elena's card. Riley opens the engineer board (live position, area scores, incontinence probability, visual-check uncertainty). Helen opens the director board (hours saved, and pressure-ulcer prevention left unestimated).
 
 Edge token for `POST /events`: `edge-demo-token` (override with `TURNWISE_EDGE_TOKEN`).
 
