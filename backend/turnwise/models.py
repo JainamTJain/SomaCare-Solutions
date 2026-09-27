@@ -273,6 +273,7 @@ class ResidentState(Base):
     confidence: Mapped[float] = mapped_column(Float, default=0.9)
     persons_in_zone: Mapped[int] = mapped_column(Integer, default=1)
     camera_online: Mapped[bool] = mapped_column(Boolean, default=True)
+    camera_spectrum: Mapped[str] = mapped_column(String(32), default="infrared")
     settled: Mapped[bool] = mapped_column(Boolean, default=True)
     model_version: Mapped[str] = mapped_column(Text, default="position-v0.0.0-rules")
     last_change_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -312,6 +313,24 @@ class HandoffNote(Base):
     transcript: Mapped[str | None] = mapped_column(Text, nullable=True)
     transcript_status: Mapped[str] = mapped_column(String(32), default="pending_local_asr")
     text_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class MorningVital(Base):
+    """The morning chart the facility already collects. Not re-entered by the CNA."""
+
+    __tablename__ = "morning_vital"
+    __table_args__ = (UniqueConstraint("resident_id", "recorded_on"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    resident_id: Mapped[str] = mapped_column(ForeignKey("resident.id"))
+    recorded_on: Mapped[datetime] = mapped_column(Date)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    systolic: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    diastolic: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    pulse: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    temp_c: Mapped[float | None] = mapped_column(Float, nullable=True)
+    spo2: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    source: Mapped[str] = mapped_column(String(32), default="morning_chart")
 
 
 class IngestBatch(Base):

@@ -57,6 +57,10 @@ class EngineConfig:
     continence_lead_min: float = 15
     learning_period: bool = True
     sharp_min: float = 80
+    # Minutes a CNA does not walk when the camera verifies a check, or when
+    # two tasks share one visit. Shown on the shift. Not a clinical limit.
+    minutes_saved_per_verified_check: float = 4
+    minutes_saved_per_merged_visit: float = 3
     features: FeatureFlags = field(default_factory=FeatureFlags)
 
     def risk_multiplier(self, steps: int) -> float:

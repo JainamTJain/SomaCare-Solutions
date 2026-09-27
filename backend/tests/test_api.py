@@ -223,3 +223,30 @@ def test_rule_extractor_requires_nurse_approval(client):
 
 def test_missing_token_is_rejected(client):
     assert client.get("/me/shift").status_code == 401
+
+
+def test_calendar_and_time_saved_use_the_same_shift(client):
+    token, _ = _login(client, "Maria Santos")
+    shift = client.get("/me/shift", headers=_auth(token)).json()
+    saved = shift["time_saved"]
+    assert saved["verified_checks"] >= 4
+    assert saved["minutes"] == saved["verified_checks"] * 4 + saved["merged_visits"] * 3
+    ics = client.get("/me/shift.ics", headers=_auth(token))
+    assert ics.status_code == 200
+    assert "text/calendar" in ics.headers["content-type"]
+    assert "Elena Alvarez" in ics.text
+    assert "BEGIN:VCALENDAR" in ics.text
+    elena = next(item for item in shift["items"] if item["resident"]["preferred_name"] == "Elena Alvarez")
+    card = client.get(f"/residents/{elena['resident']['id']}/card", headers=_auth(token)).json()
+    assert card["camera_spectrum"] == "infrared"
+    assert card["model_version"] == "position-v0.0.0-rules"
+    assert card["vitals"]["source"] == "morning_chart"
+    assert card["vitals"]["spo2"] == 96
+    assert card["diet"]["is_order"] is False
+    assert card["diet"]["applies"] is True
+    assert card["diet"]["code"] == "diet.wet_evening"
+    nurse, _ = _login(client, "Sam Patel")
+    roster = client.get("/nurse/residents", headers=_auth(nurse)).json()["residents"]
+    james_id = next(row["id"] for row in roster if row["preferred_name"] == "James Okonkwo")
+    james_card = client.get(f"/residents/{james_id}/card", headers=_auth(token)).json()
+    assert james_card["diet"]["applies"] is False

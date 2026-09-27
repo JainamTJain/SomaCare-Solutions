@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from turnwise.auth import Principal, get_db, get_principal, issue_token, require_roles, verify_pin
+from turnwise.daybook import shift_ics
 from turnwise.careflow import (
     apply_event,
     approve_plan,
@@ -258,6 +259,24 @@ def my_shift(
 ):
     person = _staff(db, principal)
     return build_shift(db, person, utcnow())
+
+
+@router.get("/me/shift.ics")
+def my_shift_calendar(
+    principal: Principal = Depends(require_roles("cna", "charge_nurse", "nurse", "admin")),
+    db: Session = Depends(get_db),
+):
+    """The same visits, as a calendar file Google Calendar can import."""
+    from fastapi.responses import Response
+
+    person = _staff(db, principal)
+    body = build_shift(db, person, utcnow())
+    payload = shift_ics(body["items"], person.display_name)
+    return Response(
+        content=payload,
+        media_type="text/calendar",
+        headers={"Content-Disposition": 'attachment; filename="sorety-shift.ics"'},
+    )
 
 
 @router.get("/residents/{resident_id}/card")

@@ -76,5 +76,7 @@ export function renderLine(
   const next: Record<string, string> = { ...params };
   if (next.side) next.side = t(`side.${next.side}`);
   if (next.area) next.area = t(`area.${next.area}`);
+  if (next.position) next.position = t(`position.${next.position}`, { defaultValue: next.position });
+  if (next.to) next.to = t(`position.${next.to}`, { defaultValue: next.to });
   return t(code, next);
 }

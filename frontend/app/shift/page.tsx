@@ -47,11 +47,13 @@ export default function ShiftPage() {
         </Link>
       </div>
       {offline && <p className="banner">{t("shift.offline")}</p>}
-      <p className="muted">{t("shift.verified", { count: shift?.verified_checks || 0 })}</p>
-      <p className="section-label due">{t("shift.needsYou")}</p>
+      <Saved shift={shift} />
+      <p className="section-label due">{due[0] ? t("shift.next") : t("shift.needsYou")}</p>
       <div className="stack">
         {due.length === 0 && <p>{t("shift.empty")}</p>}
-        {due.map((item) => (
+        {due[0] && <VisitCard item={due[0]} next />}
+        {due.length > 1 && <p className="section-label due">{t("shift.needsYou")}</p>}
+        {due.slice(1).map((item) => (
           <VisitCard key={item.visit_id} item={item} />
         ))}
       </div>
@@ -69,7 +71,64 @@ export default function ShiftPage() {
   );
 }
 
-function VisitCard({ item }: { item: Visit }) {
+function Saved({ shift }: { shift: Shift | null }) {
+  const t = useT();
+  const saved = shift?.time_saved;
+  const minutes = saved?.minutes || 0;
+  const next = (shift?.items || []).find((item) => !item.settled);
+  const label =
+    saved && saved.hours > 0
+      ? t("shift.savedHours", { hours: saved.hours, minutes: saved.remainder_min })
+      : t("shift.saved", { minutes });
+  return (
+    <section className="saved">
+      <strong>{label}</strong>
+      <p className="muted" style={{ marginBottom: 0 }}>
+        {t("shift.savedHint")} {t("calendar.same")}
+      </p>
+      <div className="stack" style={{ marginTop: 12 }}>
+        {next?.due_at && (
+          <a className="big" style={{ textAlign: "center" }} href={googleVisit(next)} target="_blank" rel="noreferrer">
+            {t("calendar.add")}
+          </a>
+        )}
+        <button className="big quiet" onClick={() => downloadShift()}>
+          {t("calendar.download")}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function googleVisit(item: Visit) {
+  const start = new Date(item.due_at);
+  const end = new Date(start.getTime() + 15 * 60000);
+  const stamp = (moment: Date) => moment.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+  const text = `${item.resident.preferred_name} ${item.resident.room}`;
+  const details = item.tasks.join(", ");
+  const query = new URLSearchParams({
+    action: "TEMPLATE",
+    text,
+    dates: `${stamp(start)}/${stamp(end)}`,
+    details,
+  });
+  return `https://calendar.google.com/calendar/render?${query.toString()}`;
+}
+
+async function downloadShift() {
+  const session = loadSession();
+  if (!session) return;
+  const text = await api.calendar(session.token);
+  const blob = new Blob([text], { type: "text/calendar" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "sorety-shift.ics";
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function VisitCard({ item, next = false }: { item: Visit; next?: boolean }) {
   const t = useT();
   const mins = minutesUntil(item.due_at);
   const late = mins < 0;
@@ -81,7 +140,7 @@ function VisitCard({ item }: { item: Visit }) {
     : "";
   const href = item.alert_id ? `/alerts/${item.alert_id}` : `/residents/${item.resident.id}`;
   return (
-    <Link className="visit" href={href}>
+    <Link className={next ? "visit next" : "visit"} href={href}>
       <div className="spread">
         <span className="name">{item.resident.preferred_name}</span>
         <span className={late ? "time late" : "time"}>

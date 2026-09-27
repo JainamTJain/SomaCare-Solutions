@@ -3,17 +3,21 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
 from turnwise.auth import hash_pin
+from turnwise.daybook import morning_chart_time
 from turnwise.engine.budget import ALL_AREAS
 from turnwise.models import (
     Alert,
     Assignment,
-    Event,
     BradenAssessment,
+    ContinenceObs,
+    Event,
     Facility,
+    MorningVital,
     Plan,
     Preference,
     Resident,
@@ -28,6 +32,21 @@ from turnwise.models import (
 )
 
 NOW = datetime.now(timezone.utc)
+
+# Copied from a morning chart for the demo hall. The CNA does not retype these.
+MORNING_CHART = {
+    "Elena Alvarez": (128, 76, 72, 36.6, 96, 62.4),
+    "James Okonkwo": (134, 82, 68, 36.7, 97, 81.0),
+    "Mei Lin": (118, 70, 74, 36.5, 95, 54.2),
+    "Rosa Delgado": (122, 74, 70, 36.8, 97, 68.1),
+    "Harold Bennett": (140, 78, 64, 36.4, 96, 77.5),
+    "Leticia Ramos": (126, 80, 76, 36.6, 98, 71.0),
+    "Samir Haddad": (130, 84, 71, 36.9, 95, 79.3),
+    "Patricia Nguyen": (116, 72, 69, 36.5, 97, 58.8),
+    "Carmen Ruiz": (136, 86, 80, 37.0, 94, 66.0),
+    "Arthur Blake": (142, 88, 78, 36.7, 95, 84.6),
+}
+VERIFIED_TODAY = {"Elena Alvarez", "Mei Lin", "Rosa Delgado", "Arthur Blake"}
 
 RESIDENTS = [
     {
@@ -405,6 +424,7 @@ def seed_if_empty(db: Session) -> None:
                 confidence=0.92,
                 persons_in_zone=1,
                 camera_online=not spec.get("camera_offline", False),
+                camera_spectrum="offline" if spec.get("camera_offline") else "infrared",
                 settled=spec["load_back"] < 40,
                 model_version="position-v0.0.0-rules",
                 last_change_at=now - timedelta(hours=spec["last_change_h"]),
@@ -425,6 +445,35 @@ def seed_if_empty(db: Session) -> None:
                     source="nurse_schedule",
                     status="open",
                     detail={"fixed_schedule": True},
+                )
+            )
+        chart = MORNING_CHART.get(spec["name"])
+        if chart:
+            systolic, diastolic, pulse, temp_c, spo2, weight = chart
+            db.add(
+                MorningVital(
+                    resident_id=resident.id,
+                    recorded_on=now.astimezone(ZoneInfo("America/Los_Angeles")).date(),
+                    recorded_at=morning_chart_time(now, "America/Los_Angeles"),
+                    systolic=systolic,
+                    diastolic=diastolic,
+                    pulse=pulse,
+                    temp_c=temp_c,
+                    spo2=spo2,
+                    weight_kg=weight,
+                    source="morning_chart",
+                )
+            )
+        if spec["name"] in VERIFIED_TODAY:
+            db.add(
+                Task(
+                    resident_id=resident.id,
+                    kind="check",
+                    due_at=now - timedelta(hours=1),
+                    window_min=30,
+                    source="camera",
+                    status="verified",
+                    detail={"verified_by": "camera"},
                 )
             )
         if spec.get("camera_offline"):
@@ -495,6 +544,28 @@ def seed_if_empty(db: Session) -> None:
             value={"from": "left", "to": "back"},
             confidence=0.9,
             model_version="position-v0.0.0-rules",
+        )
+    )
+    la = ZoneInfo("America/Los_Angeles")
+    for days_ago in (1, 2, 3, 4):
+        local = (now.astimezone(la) - timedelta(days=days_ago)).replace(
+            hour=19, minute=30, second=0, microsecond=0
+        )
+        db.add(
+            ContinenceObs(
+                resident_id=elena.id,
+                kind="wet",
+                ts=local.astimezone(timezone.utc),
+            )
+        )
+    morning = (now.astimezone(la) - timedelta(days=2)).replace(
+        hour=9, minute=10, second=0, microsecond=0
+    )
+    db.add(
+        ContinenceObs(
+            resident_id=elena.id,
+            kind="wet",
+            ts=morning.astimezone(timezone.utc),
         )
     )
     db.commit()

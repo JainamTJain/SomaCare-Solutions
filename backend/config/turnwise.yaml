@@ -39,6 +39,10 @@ continence_bin_min: 30
 continence_lead_min: 15
 learning_period: true
 sharp_min: 80
+# A verified check is a walk the CNA did not take. A merged visit is a second
+# trip that did not happen. The shift shows the sum. These are not care limits.
+minutes_saved_per_verified_check: 4
+minutes_saved_per_merged_visit: 3
 
 features:
   # Both language-model hooks stay off. The non-AI fallbacks are the

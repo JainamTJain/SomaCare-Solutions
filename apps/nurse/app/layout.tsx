@@ -1,6 +1,6 @@
 import "./globals.css";
 
-export const metadata = { title: "TurnWise nurse" };
+export const metadata = { title: "Sorety nurse" };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (

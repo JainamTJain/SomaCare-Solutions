@@ -58,7 +58,7 @@ def create_app() -> FastAPI:
         db.close()
 
     app = FastAPI(
-        title="TurnWise",
+        title="Sorety",
         version="0.1.0",
         description=(
             "Care engine and API. Position, risk, scheduling and alerts are "

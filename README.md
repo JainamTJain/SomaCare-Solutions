@@ -1,6 +1,8 @@
-# TurnWise
+# Sorety
 
 Camera-verified turning and continence rounds. Nurses set every limit. CNAs log nothing for routine care. The care engine is rules and statistical models. It does not call a language model to score, schedule, or alert.
+
+The phone app is named Sorety. The shift can be dropped onto Google Calendar, the night camera has to be infrared, and the summary shows minutes the CNA did not walk. How that sits on a real hall is in `docs/wiring.md`.
 
 ## Run it locally
 

@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { Shell } from "../../components/Shell";
-import { Shift, api } from "../../lib/api";
-import { useT } from "../../lib/i18n";
+import { ChartLine, Shift, api } from "../../lib/api";
+import { renderLine, useT } from "../../lib/i18n";
 import { clearSession, loadSession } from "../../lib/session";
 import { useRouter } from "next/navigation";
 
@@ -23,8 +23,19 @@ export default function SummaryPage() {
     <Shell>
       <p className="kicker">{t("nav.summary")}</p>
       <h1>{t("summary.thanks")}</h1>
+      <p>{t("summary.savedTime", { minutes: shift?.time_saved?.minutes || 0 })}</p>
       <p>{t("summary.open", { count: open })}</p>
       <p>{t("summary.verified", { count: shift?.verified_checks || 0 })}</p>
+      {(shift?.chart_lines || []).length > 0 && (
+        <>
+          <p className="section-label">{t("chart.title")}</p>
+          <ul className="how">
+            {(shift?.chart_lines as ChartLine[]).map((line) => (
+              <li key={line.ts + line.code}>{renderLine(t, line.code, line.params || {})}</li>
+            ))}
+          </ul>
+        </>
+      )}
       <label className="stack" style={{ marginTop: 12 }}>
         <span>{t("summary.note")}</span>
         <textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder={t("summary.placeholder")} />

@@ -12,6 +12,13 @@ from zoneinfo import ZoneInfo
 from sqlalchemy.orm import Session
 
 from turnwise.config import EngineConfig, load_config
+from turnwise.daybook import (
+    count_verified,
+    diet_for_resident,
+    latest_vitals,
+    recent_chart_lines,
+    time_saved,
+)
 from turnwise.engine.alerts import AlertState, advance_alert, allow_send
 from turnwise.engine.budget import (
     ALL_AREAS,
@@ -785,12 +792,19 @@ def build_shift(db: Session, staff: Staff, now: datetime) -> dict:
             }
         )
     db.commit()
+    resident_ids = [row.id for row in residents]
+    merged_visits = sum(1 for task in tasks if task.merged_into)
+    window_start = shift.starts_at if shift else now - timedelta(hours=8)
+    window_end = shift.ends_at if shift else now
+    saved = time_saved(count_verified(db, resident_ids, window_start, window_end), merged_visits, config)
     return {
         "shift_id": shift.id if shift else None,
         "language": staff.ui_language,
         "staff": {"id": staff.id, "display_name": staff.display_name, "role": staff.role},
         "items": items,
         "verified_checks": verified,
+        "time_saved": saved,
+        "chart_lines": recent_chart_lines(db, resident_ids, window_start),
         "generated_at": now.isoformat(),
     }
 
@@ -825,6 +839,12 @@ def resident_card(db: Session, resident_id: str, now: datetime) -> dict:
         "how_to": how_to_codes(prefs, two_person=bool(plan.two_person) if plan else False),
         "two_person": bool(plan.two_person) if plan else False,
         "continence_threshold": plan.continence_threshold if plan else None,
+        "camera_spectrum": state.camera_spectrum if state else "offline",
+        "confidence": state.confidence if state else 0,
+        "model_version": state.model_version if state else "position-v0.0.0-rules",
+        "vitals": latest_vitals(db, resident_id),
+        "diet": diet_for_resident(db, resident_id, now, cfg().facility_timezone),
+        "chart_lines": recent_chart_lines(db, [resident_id], now - timedelta(days=7), limit=3),
     }
 
 

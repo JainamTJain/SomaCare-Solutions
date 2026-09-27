@@ -184,6 +184,7 @@ CREATE TABLE resident_state (
   confidence REAL,
   persons_in_zone INT,
   camera_online BOOLEAN,
+  camera_spectrum TEXT DEFAULT 'infrared',
   settled BOOLEAN,
   model_version TEXT,
   last_change_at TIMESTAMPTZ,
@@ -222,6 +223,20 @@ CREATE TABLE handoff_note (
   transcript TEXT,
   transcript_status TEXT,
   text_note TEXT
+);
+CREATE TABLE morning_vital (
+  id UUID PRIMARY KEY,
+  resident_id UUID REFERENCES resident,
+  recorded_on DATE,
+  recorded_at TIMESTAMPTZ,
+  systolic INT,
+  diastolic INT,
+  pulse INT,
+  temp_c REAL,
+  spo2 INT,
+  weight_kg REAL,
+  source TEXT,
+  UNIQUE (resident_id, recorded_on)
 );
 CREATE TABLE ingest_batch (
   id UUID PRIMARY KEY,

@@ -17,12 +17,22 @@ export type Visit = {
   alert_id: string | null;
   settled: boolean;
 };
+export type TimeSaved = {
+  minutes: number;
+  hours: number;
+  remainder_min: number;
+  verified_checks: number;
+  merged_visits: number;
+};
+export type ChartLine = { ts: string; code: string; params: Record<string, string> };
 export type Shift = {
   shift_id: string;
   language: string;
   staff: { id: string; display_name: string; role: string };
   items: Visit[];
   verified_checks: number;
+  time_saved?: TimeSaved;
+  chart_lines?: ChartLine[];
   generated_at: string;
 };
 
@@ -45,6 +55,7 @@ export const api = {
   login: (staff_id: string, pin: string) =>
     request("/auth/login", null, { method: "POST", body: JSON.stringify({ staff_id, pin }) }),
   shift: (token: string) => request("/me/shift", token) as Promise<Shift>,
+  calendar: (token: string) => request("/me/shift.ics", token) as Promise<string>,
   card: (token: string, id: string) => request(`/residents/${id}/card`, token),
   history: (token: string, id: string) => request(`/residents/${id}/history?days=7`, token),
   continence: (token: string, id: string) => request(`/residents/${id}/continence`, token),
