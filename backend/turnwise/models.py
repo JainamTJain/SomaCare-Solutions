@@ -182,6 +182,8 @@ class Event(Base):
     value: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     model_version: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    device_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
 class ContinenceObs(Base):
@@ -331,6 +333,30 @@ class MorningVital(Base):
     spo2: Mapped[int | None] = mapped_column(Integer, nullable=True)
     weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
     source: Mapped[str] = mapped_column(String(32), default="morning_chart")
+
+
+class Device(Base):
+    """One infrared baby monitor, paired to the shared home computer."""
+
+    __tablename__ = "device"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(32))
+    room_id: Mapped[str | None] = mapped_column(ForeignKey("room.id"), nullable=True)
+    resident_id: Mapped[str | None] = mapped_column(ForeignKey("resident.id"), nullable=True)
+    installed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_seen: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class HomeInstall(Base):
+    """Installer checklist for one home. No images are stored here."""
+
+    __tablename__ = "home_install"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    home_name: Mapped[str] = mapped_column(Text, default="Harbor House")
+    steps: Mapped[dict] = mapped_column(JSON, default=dict)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
 class IngestBatch(Base):

@@ -20,6 +20,7 @@ from turnwise.daybook import (
     time_saved,
 )
 from turnwise.engine.alerts import AlertState, advance_alert, allow_send
+from turnwise.engine.fusion import BedMovement, VisionChange, classify_reposition, resets_timer
 from turnwise.engine.budget import (
     ALL_AREAS,
     Budget,
@@ -38,6 +39,7 @@ from turnwise.models import (
     AuditLog,
     BradenAssessment,
     ContinenceObs,
+    Device,
     Event,
     Override,
     Plan,
@@ -422,6 +424,10 @@ def apply_event(db: Session, payload: dict) -> dict:
         "care_visit",
         "camera_offline",
         "heartbeat",
+        "stillness",
+        "bed_return",
+        "night_vitals",
+        "device_offline",
     }:
         raise ValueError(f"unknown event kind {kind}")
     room = db.get(Room, payload.get("room_id")) if payload.get("room_id") else None
@@ -442,11 +448,35 @@ def apply_event(db: Session, payload: dict) -> dict:
                 value={"ignored": True, "reason": "analysis_disabled"},
                 confidence=payload.get("confidence"),
                 model_version=payload.get("model_version"),
+                source=payload.get("source"),
+                device_id=payload.get("device_id"),
             )
         )
         return {"ignored": True, "reason": "analysis_disabled"}
 
-    value = payload.get("value") or {}
+    value = dict(payload.get("value") or {})
+    source = payload.get("source")
+    if source not in {None, "bed_sensor", "vision", "camera", "manual"}:
+        raise ValueError(f"unknown event source {source}")
+    fusion = None
+    # A camera or vision event below the confidence gate is logged and does
+    # not move the pressure clock. Events with no source keep the older path
+    # so a witnessed turn still resolves.
+    if source == "bed_sensor" and kind == "movement":
+        movement = BedMovement(
+            magnitude=float(value.get("magnitude") or 0),
+            duration_s=float(value.get("duration_s") or 0),
+        )
+        fusion = classify_reposition(None, movement, config, has_vision=False)
+        value["fusion"] = fusion
+    elif kind in {"position", "turn"} and source in {"vision", "camera"}:
+        vision = VisionChange(confidence=float(payload.get("confidence") or 0))
+        bed = None
+        if value.get("bed_magnitude") is not None:
+            bed = BedMovement(magnitude=float(value["bed_magnitude"]), duration_s=float(value.get("bed_duration_s") or 0))
+        fusion = classify_reposition(vision, bed, config, has_vision=True)
+        value["fusion"] = fusion
+    skip_clock = fusion is not None and not resets_timer(str(fusion), config)
     event = Event(
         room_id=resident.room_id,
         resident_id=resident.id,
@@ -455,6 +485,8 @@ def apply_event(db: Session, payload: dict) -> dict:
         value=value,
         confidence=payload.get("confidence"),
         model_version=payload.get("model_version"),
+        source=source,
+        device_id=payload.get("device_id"),
     )
     db.add(event)
     state = db.get(ResidentState, resident.id)
@@ -476,36 +508,42 @@ def apply_event(db: Session, payload: dict) -> dict:
         new_pos = value.get("position", "unknown")
         if new_pos not in POSITIONS:
             raise ValueError(f"unknown position {new_pos}")
-        previous = state.position
-        persons = int(value.get("persons_in_zone", state.persons_in_zone or 1))
-        state.persons_in_zone = persons
         if payload.get("confidence") is not None:
             state.confidence = float(payload["confidence"])
-        state.position = new_pos
-        if new_pos not in ("unknown", "out_of_room"):
-            budget.last_known = new_pos
-            state.last_known = new_pos
-        state.settled = state.confidence >= config.verify_min_confidence and new_pos in {
-            "back",
-            "left",
-            "right",
-        }
         if payload.get("model_version"):
             state.model_version = payload["model_version"]
-        if persons >= 2 and new_pos != previous and new_pos in {"back", "left", "right", "sitting"}:
-            resolved = resolve_open_care(db, resident.id, ts, rule="position_with_presence")
-        elif persons == 1 and new_pos != previous and new_pos in {"back", "left", "right", "sitting", "out_of_bed"}:
-            # Self-repositioning relieves the budget by the new position; the
-            # open turn is resolved because the resident moved themselves.
-            resolved = resolve_open_care(db, resident.id, ts, rule="self_reposition")
+        if skip_clock:
+            state.settled = False
+        else:
+            previous = state.position
+            persons = int(value.get("persons_in_zone", state.persons_in_zone or 1))
+            state.persons_in_zone = persons
+            state.position = new_pos
+            if new_pos not in ("unknown", "out_of_room"):
+                budget.last_known = new_pos
+                state.last_known = new_pos
+            state.settled = state.confidence >= config.verify_min_confidence and new_pos in {
+                "back",
+                "left",
+                "right",
+            }
+            if persons >= 2 and new_pos != previous and new_pos in {"back", "left", "right", "sitting"}:
+                resolved = resolve_open_care(db, resident.id, ts, rule="position_with_presence")
+            elif persons == 1 and new_pos != previous and new_pos in {"back", "left", "right", "sitting", "out_of_bed"}:
+                # Self-repositioning relieves the budget by the new position; the
+                # open turn is resolved because the resident moved themselves.
+                resolved = resolve_open_care(db, resident.id, ts, rule="self_reposition")
     elif kind == "turn":
-        new_pos = value.get("to", state.position)
-        state.position = new_pos
-        state.persons_in_zone = max(state.persons_in_zone or 1, 2)
-        if new_pos in POSITIONS and new_pos not in ("unknown", "out_of_room"):
-            budget.last_known = new_pos
-            state.last_known = new_pos
-        resolved = resolve_open_care(db, resident.id, ts, rule="turn_event")
+        if not skip_clock:
+            new_pos = value.get("to", state.position)
+            state.position = new_pos
+            state.persons_in_zone = max(state.persons_in_zone or 1, 2)
+            if new_pos in POSITIONS and new_pos not in ("unknown", "out_of_room"):
+                budget.last_known = new_pos
+                state.last_known = new_pos
+            if payload.get("confidence") is not None:
+                state.confidence = float(payload["confidence"])
+            resolved = resolve_open_care(db, resident.id, ts, rule="turn_event")
     elif kind == "care_visit":
         resolved = resolve_open_care(db, resident.id, ts, rule="care_visit")
         if value.get("includes_change"):
@@ -519,10 +557,20 @@ def apply_event(db: Session, payload: dict) -> dict:
                     interval_start=_aware(previous_change) if previous_change else None,
                 )
             )
-    elif kind == "camera_offline":
+    elif kind in {"camera_offline", "device_offline"}:
         state.camera_online = False
+        state.camera_spectrum = "offline"
     elif kind == "heartbeat":
-        state.camera_online = True
+        spectrum = value.get("camera_spectrum")
+        if spectrum == "color_rejected":
+            state.camera_online = False
+            state.camera_spectrum = "color_rejected"
+        else:
+            state.camera_online = True
+            if spectrum:
+                state.camera_spectrum = spectrum
+    elif kind in {"night_vitals", "stillness", "bed_return"}:
+        pass
     elif kind == "presence_start":
         state.persons_in_zone = int(value.get("persons", 2))
     elif kind == "presence_end":
@@ -542,7 +590,7 @@ def apply_event(db: Session, payload: dict) -> dict:
     elif kind == "movement":
         pass
 
-    if kind in {"position", "turn", "bed_exit"} and state.position in {
+    if not skip_clock and kind in {"position", "turn", "bed_exit"} and state.position in {
         "back",
         "left",
         "right",
@@ -554,9 +602,10 @@ def apply_event(db: Session, payload: dict) -> dict:
         budget.step(state.position, ts, 0, config)
     state.last_ts = ts
     save_budget(state, budget)
-    if kind not in {"camera_offline"} and state.camera_online:
+    _touch_device(db, payload, resident, ts, value, online=state.camera_online)
+    if kind not in {"camera_offline", "device_offline", "night_vitals"} and state.camera_online:
         ensure_turn_alert(db, resident, state, budget, ts, config)
-    if kind in {"care_visit", "bathroom_trip", "heartbeat", "position"}:
+    if kind in {"care_visit", "bathroom_trip", "heartbeat", "position"} and not skip_clock:
         ensure_continence_task(db, resident, state, ts, config)
     tick_alerts(db, ts, config)
     db.flush()
@@ -567,6 +616,50 @@ def apply_event(db: Session, payload: dict) -> dict:
         "load": state.load,
         "resolved_alerts": resolved,
     }
+
+
+def _touch_device(
+    db: Session,
+    payload: dict,
+    resident: Resident,
+    ts: datetime,
+    value: dict,
+    *,
+    online: bool,
+) -> None:
+    """Record that the home computer heard this baby monitor. No image is stored."""
+    device_id = payload.get("device_id")
+    if not device_id:
+        return
+    device = db.get(Device, device_id)
+    if device is None:
+        device = Device(
+            id=device_id,
+            kind="camera",
+            room_id=resident.room_id,
+            resident_id=resident.id,
+            installed_at=ts,
+            config={"label": "infrared baby monitor", "mic": "off", "cloud": "off"},
+            active=True,
+        )
+        db.add(device)
+    device.last_seen = ts
+    device.resident_id = device.resident_id or resident.id
+    device.room_id = device.room_id or resident.room_id
+    device.active = bool(online)
+    stored = dict(device.config or {})
+    stored["label"] = stored.get("label") or "infrared baby monitor"
+    if "fps" in value:
+        stored["fps"] = value["fps"]
+    if "latency_ms" in value:
+        stored["latency_ms"] = value["latency_ms"]
+    spectrum = value.get("camera_spectrum") or value.get("spectrum")
+    if spectrum:
+        stored["spectrum"] = spectrum
+    if payload.get("kind") in {"device_offline", "camera_offline"}:
+        stored["spectrum"] = "offline"
+        device.active = False
+    device.config = stored
 
 
 def current_shift(db: Session, now: datetime) -> Shift | None:

@@ -27,7 +27,7 @@ from turnwise.engine.budget import ALL_AREAS
 from turnwise.engine.budget import limit as area_limit
 from turnwise.engine.risk_rules import extra_risk_steps
 from turnwise.engine.scheduler import SchedTask, can_verify_check, merge_tasks
-from turnwise.models import Alert, Resident, ResidentState, Room, SkinAssessment, Task
+from turnwise.models import Alert, Device, HomeInstall, Resident, ResidentState, Room, SkinAssessment, Task
 
 IN_BED = {"back", "left", "right", "sitting"}
 INJURY_FINDINGS = {"stage1", "stage2", "stage3", "stage4", "unstageable", "dtpi", "red"}
@@ -203,6 +203,53 @@ def _saved_by_kind(db: Session, now: datetime, config: EngineConfig) -> dict:
     return {"by_kind": kinds, "total_minutes": total_minutes, "total_hours": round(total_minutes / 60, 2)}
 
 
+def camera_table(db: Session, now: datetime) -> list[dict]:
+    """Baby monitors the shared computer is watching. No frames."""
+    moment = _aware(now)
+    rows = []
+    devices = db.query(Device).filter(Device.kind == "camera").all()
+    for device in devices:
+        room = db.get(Room, device.room_id) if device.room_id else None
+        resident = db.get(Resident, device.resident_id) if device.resident_id else None
+        state = db.get(ResidentState, device.resident_id) if device.resident_id else None
+        stored = device.config or {}
+        spectrum = stored.get("spectrum") or (state.camera_spectrum if state else "offline")
+        seen = _aware(device.last_seen) if device.last_seen else None
+        age = int((moment - seen).total_seconds()) if seen else None
+        confidence = state.confidence if state and state.confidence is not None else None
+        rows.append(
+            {
+                "device_id": device.id,
+                "room": room.label if room else None,
+                "resident": resident.preferred_name if resident else None,
+                "label": stored.get("label") or "infrared baby monitor",
+                "kind": device.kind,
+                "online": bool(device.active) and spectrum == "infrared",
+                "infrared": spectrum == "infrared",
+                "spectrum": spectrum,
+                "fps": stored.get("fps"),
+                "latency_ms": stored.get("latency_ms"),
+                "last_seen": seen.isoformat() if seen else None,
+                "seconds_since_seen": age,
+                "uncertainty_pct": round((1 - confidence) * 100) if confidence is not None else None,
+                "mic": stored.get("mic"),
+                "cloud": stored.get("cloud"),
+            }
+        )
+    rows.sort(key=lambda row: row["room"] or "")
+    return rows
+
+
+def install_checklist(db: Session) -> dict:
+    row = db.query(HomeInstall).order_by(HomeInstall.updated_at.desc()).first()
+    steps = row.steps if row and row.steps else {}
+    return {
+        "home": row.home_name if row else None,
+        "note": steps.get("note"),
+        "steps": steps.get("items") or [],
+    }
+
+
 def engineer_board(db: Session, now: datetime) -> dict:
     config = load_config()
     rows = hall_rows(db, now, config)
@@ -210,8 +257,21 @@ def engineer_board(db: Session, now: datetime) -> dict:
         "generated_at": now.isoformat(),
         "pilot_mode": config.pilot_mode,
         "position_model": "position-v0.0.0-rules",
-        "position_model_note": "Shoulder-hip rule. Not trained on SLP. Infrared frames only; color frames are rejected.",
+        "position_model_note": (
+            "Shoulder-hip rule on the home computer, reading an infrared baby monitor. "
+            "Not a language model. Not trained on SLP. Color frames are rejected. Frames stay in the house."
+        ),
         "verify_gate": config.verify_min_confidence,
+        "sensing": {
+            "default": "infrared baby monitor",
+            "computer": "one shared home computer",
+            "model": "position-v0.0.0-rules",
+            "frames_leave_home": False,
+            "microphone": "off",
+            "cloud": "off",
+        },
+        "cameras": camera_table(db, now),
+        "install": install_checklist(db),
         "residents": rows,
     }
 
@@ -260,6 +320,7 @@ def director_board(db: Session, now: datetime) -> dict:
             "residents_at_or_over_limit": len(over),
         },
         "cameras": {
+            "hardware": "infrared baby monitor",
             "infrared_online": len(online),
             "residents": len(rows),
             "mean_uncertainty_pct": mean_uncertainty,

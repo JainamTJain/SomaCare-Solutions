@@ -40,11 +40,38 @@ type ResidentRow = {
   open_alert: { rule: string; status: string; inputs: Record<string, unknown> } | null;
 };
 
+type CameraRow = {
+  device_id: string;
+  room: string | null;
+  resident: string | null;
+  label: string;
+  online: boolean;
+  infrared: boolean;
+  spectrum: string;
+  fps: number | null;
+  latency_ms: number | null;
+  last_seen: string | null;
+  uncertainty_pct: number | null;
+  mic: string | null;
+  cloud: string | null;
+};
+
+type InstallStep = { id: string; label: string; done: boolean };
+
 type Board = {
   generated_at: string;
   position_model: string;
   position_model_note: string;
   verify_gate: number;
+  sensing?: {
+    default: string;
+    computer: string;
+    frames_leave_home: boolean;
+    microphone: string;
+    cloud: string;
+  };
+  cameras?: CameraRow[];
+  install?: { note?: string | null; steps: InstallStep[] };
   residents: ResidentRow[];
 };
 
@@ -100,9 +127,56 @@ export default function EngineerPage() {
       <p className="muted">{board?.position_model_note}</p>
       <p className="muted">
         Live. Refreshes every 2 seconds. Model {board?.position_model}. Visual-check gate{" "}
-        {board ? Math.round(board.verify_gate * 100) : "—"}%.
+        {board ? Math.round(board.verify_gate * 100) : "—"}%. One shared computer. Frames stay in the house.
       </p>
       {error && <p className="banner">{error}</p>}
+      <h2>Baby monitors</h2>
+      <div style={{ overflowX: "auto" }}>
+        <table className="raw">
+          <thead>
+            <tr>
+              <th>Room</th>
+              <th>Camera</th>
+              <th>Infrared</th>
+              <th>fps</th>
+              <th>Latency</th>
+              <th>Uncertainty</th>
+              <th>Last seen</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(board?.cameras || []).map((camera) => (
+              <tr key={camera.device_id}>
+                <td>
+                  {camera.room}
+                  <div>{camera.resident}</div>
+                </td>
+                <td>
+                  {camera.label}
+                  <div className="muted">
+                    {camera.online ? "online" : "offline"} · mic {camera.mic || "off"} · cloud {camera.cloud || "off"}
+                  </div>
+                </td>
+                <td>{camera.infrared ? "yes" : camera.spectrum}</td>
+                <td>{camera.fps ?? "—"}</td>
+                <td>{camera.latency_ms == null ? "—" : `${camera.latency_ms} ms`}</td>
+                <td>{camera.uncertainty_pct == null ? "—" : `${camera.uncertainty_pct}%`}</td>
+                <td>{camera.last_seen ? new Date(camera.last_seen).toLocaleTimeString() : "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <h2>Install</h2>
+      <p className="muted">{board?.install?.note}</p>
+      <ul>
+        {(board?.install?.steps || []).map((step) => (
+          <li key={step.id}>
+            {step.done ? "Done" : "Open"} — {step.label}
+          </li>
+        ))}
+      </ul>
+      <h2>Residents</h2>
       <div style={{ overflowX: "auto" }}>
         <table className="raw">
           <thead>

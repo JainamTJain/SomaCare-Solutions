@@ -27,7 +27,12 @@ type Board = {
     residents_inside_nurse_limit: number;
     residents_at_or_over_limit: number;
   };
-  cameras: { infrared_online: number; residents: number; mean_uncertainty_pct: number | null };
+  cameras: {
+    hardware?: string;
+    infrared_online: number;
+    residents: number;
+    mean_uncertainty_pct: number | null;
+  };
   incontinence: { above_nurse_threshold: number; names: string[] };
   visual_checks_passing: number;
   closest_to_limit: { name: string; room: string; worst_area: string | null; worst_ratio: number | null }[];
@@ -136,7 +141,7 @@ export default function DirectorPage() {
           <p className="muted">{(board?.incontinence.names || []).join(", ") || "No one is over the nurse’s threshold right now."}</p>
         </article>
         <article className="metric">
-          <span className="muted">Infrared cameras online</span>
+          <span className="muted">Infrared baby monitors online</span>
           <b>
             {board?.cameras.infrared_online ?? "—"}/{board?.cameras.residents ?? "—"}
           </b>

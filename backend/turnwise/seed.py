@@ -15,8 +15,10 @@ from turnwise.models import (
     Assignment,
     BradenAssessment,
     ContinenceObs,
+    Device,
     Event,
     Facility,
+    HomeInstall,
     MorningVital,
     Plan,
     Preference,
@@ -47,6 +49,23 @@ MORNING_CHART = {
     "Arthur Blake": (142, 88, 78, 36.7, 95, 84.6),
 }
 VERIFIED_TODAY = {"Elena Alvarez", "Mei Lin", "Rosa Delgado", "Arthur Blake"}
+
+# Installer checklist for a cheap infrared baby monitor. No bed-sensor step.
+BABY_MONITOR_INSTALL = {
+    "note": (
+        "Checklist for a cheap infrared baby monitor on one shared computer. "
+        "This demo hall has the boxes ticked. No Tapo was connected and no 72-hour soak was run."
+    ),
+    "items": [
+        {"id": "consent", "label": "Written consent or waiver for an in-room camera", "done": True},
+        {"id": "mic", "label": "Microphone off on the baby monitor", "done": True},
+        {"id": "cloud", "label": "Cloud recording off", "done": True},
+        {"id": "internet", "label": "Camera blocked from the internet at the router", "done": True},
+        {"id": "mount", "label": "Mounted at the foot of the bed, aimed at the torso", "done": True},
+        {"id": "pair", "label": "Paired to the shared home computer over local RTSP", "done": True},
+        {"id": "night", "label": "Night test shows infrared and confidence above 0.7", "done": True},
+    ],
+}
 
 RESIDENTS = [
     {
@@ -434,6 +453,28 @@ def seed_if_empty(db: Session) -> None:
                 night_movements_per_hour=spec["movements"],
             )
         )
+        offline = bool(spec.get("camera_offline"))
+        db.add(
+            Device(
+                id=f"baby-monitor-{spec['room']}",
+                kind="camera",
+                room_id=room.id,
+                resident_id=resident.id,
+                installed_at=now - timedelta(days=3),
+                last_seen=None if offline else now,
+                active=not offline,
+                config={
+                    "label": "infrared baby monitor",
+                    "class": "tapo-c210",
+                    "spectrum": "offline" if offline else "infrared",
+                    "fps": 0 if offline else 1.0,
+                    "latency_ms": None if offline else 180,
+                    "mic": "off",
+                    "cloud": "off",
+                    "rtsp": f"rtsp://192.168.1.{20 + index}/stream1",
+                },
+            )
+        )
         db.add(
             Assignment(shift_id=shift.id, resident_id=resident.id, staff_id=maria.id)
         )
@@ -568,6 +609,13 @@ def seed_if_empty(db: Session) -> None:
             resident_id=elena.id,
             kind="wet",
             ts=morning.astimezone(timezone.utc),
+        )
+    )
+    db.add(
+        HomeInstall(
+            home_name="Harbor House",
+            steps=BABY_MONITOR_INSTALL,
+            updated_at=now,
         )
     )
     db.commit()

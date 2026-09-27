@@ -105,10 +105,13 @@ CREATE TABLE event (
   resident_id UUID REFERENCES resident,
   ts TIMESTAMPTZ NOT NULL,
   kind TEXT CHECK (kind IN ('position','movement','presence_start','presence_end','bed_exit',
-    'bathroom_trip','bath_start','bath_end','turn','care_visit','camera_offline','heartbeat')),
+    'bathroom_trip','bath_start','bath_end','turn','care_visit','camera_offline','heartbeat',
+    'stillness','bed_return','night_vitals','device_offline')),
   value JSONB,
   confidence REAL,
-  model_version TEXT
+  model_version TEXT,
+  source TEXT CHECK (source IS NULL OR source IN ('bed_sensor','vision','camera','manual')),
+  device_id TEXT
 );
 CREATE TABLE continence_obs (
   id BIGSERIAL PRIMARY KEY,
@@ -245,4 +248,20 @@ CREATE TABLE ingest_batch (
   created_at TIMESTAMPTZ,
   summary JSONB,
   UNIQUE (source_name, checksum)
+);
+CREATE TABLE device (
+  id TEXT PRIMARY KEY,
+  kind TEXT CHECK (kind IN ('bed_sensor','vision_partner','vision_edge','camera')),
+  room_id UUID REFERENCES room,
+  resident_id UUID REFERENCES resident,
+  installed_at TIMESTAMPTZ,
+  last_seen TIMESTAMPTZ,
+  config JSONB,
+  active BOOLEAN DEFAULT TRUE
+);
+CREATE TABLE home_install (
+  id UUID PRIMARY KEY,
+  home_name TEXT,
+  steps JSONB,
+  updated_at TIMESTAMPTZ
 );

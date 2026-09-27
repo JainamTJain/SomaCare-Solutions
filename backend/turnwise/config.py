@@ -61,6 +61,15 @@ class EngineConfig:
     # two tasks share one visit. Shown on the shift. Not a clinical limit.
     minutes_saved_per_verified_check: float = 4
     minutes_saved_per_merged_visit: float = 3
+    # Fusion. Bed-only movement stays uncertain until a bench test sets this.
+    vision_min_conf: float = 0.7
+    bed_min_mag: float = 0.4
+    bed_reposition_mag: float = 0.75
+    bed_reposition_dur_s: float = 20
+    bed_rule_validated: bool = False
+    accept_likely: bool = True
+    has_vision: bool = True
+    device_offline_s: float = 120
     features: FeatureFlags = field(default_factory=FeatureFlags)
 
     def risk_multiplier(self, steps: int) -> float:

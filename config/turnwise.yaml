@@ -43,6 +43,15 @@ sharp_min: 80
 # trip that did not happen. The shift shows the sum. These are not care limits.
 minutes_saved_per_verified_check: 4
 minutes_saved_per_merged_visit: 3
+# Infrared baby monitor on the home computer. Uncertain vision does not reset a timer.
+vision_min_conf: 0.7
+bed_min_mag: 0.4
+bed_reposition_mag: 0.75
+bed_reposition_dur_s: 20
+bed_rule_validated: false
+accept_likely: true
+has_vision: true
+device_offline_s: 120
 
 features:
   # Both language-model hooks stay off. The non-AI fallbacks are the
