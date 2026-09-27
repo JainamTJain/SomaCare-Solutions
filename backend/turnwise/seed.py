@@ -54,7 +54,7 @@ VERIFIED_TODAY = {"Elena Alvarez", "Mei Lin", "Rosa Delgado", "Arthur Blake"}
 BABY_MONITOR_INSTALL = {
     "note": (
         "Checklist for a cheap infrared baby monitor on one shared computer. "
-        "This demo hall has the boxes ticked. No Tapo was connected and no 72-hour soak was run."
+        "No Tapo was connected. The blanket step stays open until Gate 1 is scored."
     ),
     "items": [
         {"id": "consent", "label": "Written consent or waiver for an in-room camera", "done": True},
@@ -63,7 +63,11 @@ BABY_MONITOR_INSTALL = {
         {"id": "internet", "label": "Camera blocked from the internet at the router", "done": True},
         {"id": "mount", "label": "Mounted at the foot of the bed, aimed at the torso", "done": True},
         {"id": "pair", "label": "Paired to the shared home computer over local RTSP", "done": True},
-        {"id": "night", "label": "Night test shows infrared and confidence above 0.7", "done": True},
+        {
+            "id": "night",
+            "label": "Blanket test is still open: no cover, sheet, and blanket, with false confirmed counts kept separate",
+            "done": False,
+        },
     ],
 }
 

@@ -33,6 +33,7 @@ type Board = {
     residents: number;
     mean_uncertainty_pct: number | null;
   };
+  position_claim?: { under_blanket: string; gate1: string; note: string };
   incontinence: { above_nurse_threshold: number; names: string[] };
   visual_checks_passing: number;
   closest_to_limit: { name: string; room: string; worst_area: string | null; worst_ratio: number | null }[];
@@ -146,6 +147,7 @@ export default function DirectorPage() {
             {board?.cameras.infrared_online ?? "—"}/{board?.cameras.residents ?? "—"}
           </b>
           <p className="muted">Mean position uncertainty {board?.cameras.mean_uncertainty_pct ?? "—"}%.</p>
+          <p className="muted">{board?.position_claim?.note}</p>
         </article>
       </div>
       <p className="section-label">Closest to the nurse&apos;s limit</p>

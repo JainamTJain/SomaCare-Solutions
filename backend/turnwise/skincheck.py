@@ -1,8 +1,8 @@
 """Image quality rules and encrypted storage for skin captures.
 
-The visible-injury classifier stays in shadow mode: captures are stored with
-shown_to_staff false until the PIID and pilot gates in the spec are met.
-No frame is written unencrypted.
+Skin and wound image analysis is off the near-term roadmap. It is a research
+track with no date. Captures stay encrypted and shown_to_staff stays false.
+No frame is written unencrypted. Nothing here is a diagnosis.
 """
 
 from __future__ import annotations

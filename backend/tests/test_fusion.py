@@ -11,11 +11,20 @@ def test_uncertain_vision_never_resets():
     assert resets_timer(result, cfg) is False
 
 
-def test_infrared_confidence_is_likely_without_a_bed_sensor():
+def test_uncovered_confidence_is_likely_and_still_unvalidated():
     cfg = EngineConfig()
-    result = classify_reposition(VisionChange(0.91), None, cfg, has_vision=True)
+    result = classify_reposition(VisionChange(0.91), None, cfg, has_vision=True, cover="none")
     assert result == "likely"
     assert resets_timer(result, cfg) is True
+
+
+def test_a_confident_blanket_reading_does_not_reset():
+    cfg = EngineConfig()
+    result = classify_reposition(VisionChange(0.99), None, cfg, has_vision=True, cover="blanket")
+    assert result == "uncertain"
+    assert resets_timer(result, cfg) is False
+    sheet = classify_reposition(VisionChange(0.99), None, cfg, has_vision=True, cover="sheet")
+    assert sheet == "uncertain"
 
 
 def test_bed_only_stays_uncertain_until_a_rule_is_validated():

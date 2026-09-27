@@ -48,6 +48,8 @@ def test_health_and_seed(client):
     health = client.get("/health")
     assert health.status_code == 200
     assert health.json()["pilot_mode"] is True
+    assert health.json()["gate1"] == "not_run"
+    assert health.json()["resident_data"] == "demo_only"
     roster = client.get("/auth/roster").json()["staff"]
     assert len(roster) == 7
     names = {row["display_name"] for row in roster}
@@ -295,6 +297,9 @@ def test_uncertain_baby_monitor_frame_does_not_reset_the_timer(client):
     assert event.source == "camera"
     assert event.device_id == "baby-monitor-12"
     assert event.value["fusion"] == "uncertain"
+    assert event.value["fusion_reason"] == "cover_unvalidated"
+    assert event.value["gate1"] == "not_run"
+    assert event.value["claim"] == "withheld"
     device = db.get(Device, "baby-monitor-12")
     assert device.last_seen is not None
     assert device.active is True
@@ -307,6 +312,24 @@ def test_uncertain_baby_monitor_frame_does_not_reset_the_timer(client):
     )
     assert open_after == open_before
     db.close()
+    covered = client.post(
+        "/events",
+        headers=edge,
+        json={
+            "room_id": room_id,
+            "resident_id": resident_id,
+            "ts": moment,
+            "kind": "position",
+            "source": "camera",
+            "device_id": "baby-monitor-12",
+            "value": {"position": "left", "persons_in_zone": 2, "cover": "blanket"},
+            "confidence": 0.96,
+            "model_version": "position-v0.0.0-rules",
+        },
+    )
+    assert covered.status_code == 200, covered.text
+    assert covered.json()["resolved_alerts"] == 0
+    assert covered.json()["position"] == "back"
     sure = client.post(
         "/events",
         headers=edge,
@@ -317,7 +340,7 @@ def test_uncertain_baby_monitor_frame_does_not_reset_the_timer(client):
             "kind": "position",
             "source": "camera",
             "device_id": "baby-monitor-12",
-            "value": {"position": "right", "persons_in_zone": 2, "fps": 1.0, "latency_ms": 90},
+            "value": {"position": "right", "persons_in_zone": 2, "cover": "none", "fps": 1.0, "latency_ms": 90},
             "confidence": 0.91,
             "model_version": "position-v0.0.0-rules",
         },
@@ -364,6 +387,9 @@ def test_engineer_board_is_raw_and_director_does_not_invent_ulcers(client):
     assert board["position_model"] == "position-v0.0.0-rules"
     assert board["sensing"]["default"] == "infrared baby monitor"
     assert board["sensing"]["frames_leave_home"] is False
+    assert board["sensing"]["per_side_under_blanket"] == "not_claimed"
+    assert board["gate1"]["status"] == "not_run"
+    assert board["gate1"]["hardware_hours"] == 0
     cameras = board["cameras"]
     assert len(cameras) == 10
     assert {row["kind"] for row in cameras} == {"camera"}
@@ -391,6 +417,8 @@ def test_engineer_board_is_raw_and_director_does_not_invent_ulcers(client):
     director, _ = _login(client, "Helen Cho")
     summary = client.get("/director/board", headers=_auth(director)).json()
     assert summary["pressure_injury"]["ulcers_prevented"] is None
+    assert summary["position_claim"]["under_blanket"] == "not_claimed"
+    assert summary["position_claim"]["gate1"] == "not_run"
     assert summary["pressure_injury"]["new_injuries_recorded_this_shift"] == 0
     saved = summary["time_saved"]
     assert saved["total_minutes"] == (

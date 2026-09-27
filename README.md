@@ -2,7 +2,7 @@
 
 Camera-verified turning and continence rounds. Nurses set every limit. CNAs log nothing for routine care. The care engine is rules and statistical models. It does not call a language model to score, schedule, or alert.
 
-The phone app is named Sorety. Each bed uses a cheap infrared baby monitor. One shared computer runs the shoulder-hip rule on those frames and throws the frames away. The shift can be dropped onto Google Calendar, and the summary shows minutes the CNA did not walk. How that sits on a real hall is in `docs/wiring.md`.
+The phone app is named Sorety. Each bed uses a cheap infrared baby monitor. One shared computer runs the shoulder-hip rule on those frames and throws the frames away. A side-of-body label under a blanket is not claimed: Gate 1 has not been run (`docs/plan_v3.md`, `docs/gate1_occlusion.md`). The shift can be dropped onto Google Calendar, and the summary shows minutes the CNA did not walk. How that sits on a real hall is in `docs/wiring.md`.
 
 ## Run it locally
 
