@@ -1,5 +1,9 @@
 """Load engine constants from config/turnwise.yaml. Nothing clinical is hard-coded
-in the care path beyond what this file documents."""
+in the care path beyond what this file documents.
+
+Render's root directory is backend/, so the file that ships is
+backend/config/turnwise.yaml. A copy at the repo root stays for local reading.
+"""
 
 from __future__ import annotations
 
@@ -9,8 +13,9 @@ from typing import Any
 
 import yaml
 
-ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_CONFIG_PATH = ROOT / "config" / "turnwise.yaml"
+from turnwise.paths import default_config_path
+
+DEFAULT_CONFIG_PATH = default_config_path()
 
 
 @dataclass

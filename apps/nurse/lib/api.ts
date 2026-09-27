@@ -1,4 +1,6 @@
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+import { API_BASE_URL } from "../config";
+
+const API = API_BASE_URL;
 
 export async function call(path: string, token: string | null, init: RequestInit = {}) {
   const headers = new Headers(init.headers);

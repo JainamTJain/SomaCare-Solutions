@@ -8,8 +8,9 @@ from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_SQLITE = ROOT / "var" / "turnwise.db"
+from turnwise.paths import data_dir
+
+DEFAULT_SQLITE = data_dir() / "turnwise.db"
 
 
 def database_url() -> str:

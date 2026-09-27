@@ -9,23 +9,23 @@ from __future__ import annotations
 
 import os
 import uuid
-from pathlib import Path
 
 import cv2
 import numpy as np
 from cryptography.fernet import Fernet
 
 from turnwise.config import load_config
+from turnwise.imaging import quality
+from turnwise.paths import data_dir
 
-ROOT = Path(__file__).resolve().parents[2]
-STORE = ROOT / "var" / "skin"
+STORE = data_dir() / "skin"
 
 
 def _fernet() -> Fernet:
     key = os.environ.get("TURNWISE_SKIN_KEY")
     if not key:
         # Dev-only key file, created locally and gitignored via var/.
-        path = ROOT / "var" / "skin.key"
+        path = data_dir() / "skin.key"
         path.parent.mkdir(parents=True, exist_ok=True)
         if path.exists():
             key = path.read_text().strip()
@@ -47,8 +47,6 @@ def assess_upload(raw: bytes) -> dict:
             "model_version": "skin-shadow-v0",
             "image_ref": _store(raw),
         }
-    from skin.quality import quality
-
     report = quality(image, sharp_min=config.sharp_min)
     return {
         "ok": bool(report["ok"]),

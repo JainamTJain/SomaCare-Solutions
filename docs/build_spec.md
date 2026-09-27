@@ -25,7 +25,7 @@ a language model.
 - 14-day, 24-resident facility replay.
 - Skin quality rules. Captures are encrypted and stored with `shown_to_staff = false`.
 - CNA app (English, Spanish, Tagalog) and nurse approval app.
-- Constants in `config/turnwise.yaml`.
+- Constants in `backend/config/turnwise.yaml` (same file also at `config/turnwise.yaml`).
 
 ## Not claimed
 

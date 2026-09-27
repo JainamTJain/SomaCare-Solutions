@@ -1,5 +1,5 @@
-# Keep this file identical to backend/config/turnwise.yaml.
-# Render only deploys the backend/ copy. Every constant lives here, is shown to nurses, and is copied
+# Keep this file identical to config/turnwise.yaml at the repo root.
+# Render only deploys this copy. Every constant lives here, is shown to nurses, and is copied
 # onto each alert. Pilot mode refuses any multiplier above 1: camera and
 # model data may only tighten a nurse-approved limit.
 pilot_mode: true

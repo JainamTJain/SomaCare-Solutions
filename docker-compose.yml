@@ -24,7 +24,7 @@ services:
     depends_on:
       - postgres
   cna:
-    build: ./apps/cna
+    build: ./frontend
     ports:
       - "3000:3000"
     environment:

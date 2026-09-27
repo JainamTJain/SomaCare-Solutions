@@ -9,19 +9,19 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 export PYTHONPATH=backend:ml:.
-uvicorn turnwise.main:app --reload --app-dir backend
+cd backend && uvicorn main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-The API seeds Harbor House: one unit, 10 rooms, 10 residents. Interactive docs are at `http://localhost:8000/docs`.
+The API seeds Harbor House: one unit, 10 rooms, 10 residents. Interactive docs are at `http://127.0.0.1:8000/docs`.
 
-CNA app (port 3000) and nurse app (port 3001):
+CNA app (port 3000, directory `frontend/` for Replit) and nurse app (port 3001):
 
 ```bash
-cd apps/cna && npm install && npm run dev
+cd frontend && npm install && npm run dev
 cd apps/nurse && npm install && npm run dev
 ```
 
-Set `NEXT_PUBLIC_API_URL` if the API is not on `http://localhost:8000`.
+`frontend/config.js` sends development traffic to `http://127.0.0.1:8000`. A production build uses `NEXT_PUBLIC_API_URL`, or the placeholder `https://onrender.com` until you paste the live Render URL.
 
 ### Demo sign-in
 
@@ -53,12 +53,21 @@ The continence test refits a small hazard model and takes a few seconds. The 14-
 
 ## Docker
 
-`docker compose up --build` starts Postgres (schema from `backend/migrations/001_initial.sql`), the API, and both apps. Postgres is optional for local development; the default database is SQLite under `var/`.
+`docker compose up --build` starts Postgres (schema from `backend/migrations/001_initial.sql`), the API, and both apps. Postgres is optional for local development; the default database is SQLite under `backend/var/`.
+
+## Deploy
+
+Render hosts the Python API. Replit or Vercel hosts `frontend/`.
+
+1. On Render, New → Web Service, connect this repo. Root Directory: `backend`. Build command: `pip install -r requirements.txt`. Start command: `uvicorn main:app --host 0.0.0.0 --port $PORT`. `render.yaml` records the same settings. Set `TURNWISE_SECRET`, `TURNWISE_EDGE_TOKEN`, and `TURNWISE_CORS_ORIGINS` to the live front-end origin (comma-separated if you have more than one).
+2. Copy the service URL Render prints.
+3. In Replit or Vercel, set `NEXT_PUBLIC_API_URL` to that URL and rebuild `frontend/`. Until you do, production builds call the placeholder `https://onrender.com` in `frontend/config.js`. Local `npm run dev` keeps using `http://127.0.0.1:8000`.
+4. The API allows `http://localhost:3000`, `http://127.0.0.1:3000`, the nurse app on port 3001, `https://vercel.app`, and `https://*.vercel.app` / Replit hosts. Add any other origin with `TURNWISE_CORS_ORIGINS`.
 
 ## What is deliberately not here
 
 - SLP, MIMIC-IV, and PIID. See `docs/data_licenses.md`. Position events are labeled `position-v0.0.0-rules` until a model passes the cover and infrared gates.
 - Any language-model call. Preference drafts are keyword rules and stay unapproved until a nurse accepts them.
-- Video. Frames are dropped in memory. Skin uploads are encrypted under `var/skin/`, which is gitignored, and flagged `shown_to_staff = false`.
+- Video. Frames are dropped in memory. Skin uploads are encrypted under `backend/var/skin/`, which is gitignored, and flagged `shown_to_staff = false`.
 
 Spanish and Tagalog copy still needs review by native-speaking CNAs before a pilot.

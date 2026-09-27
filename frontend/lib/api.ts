@@ -1,4 +1,6 @@
-export const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+import { API_BASE_URL } from "../config";
+
+export const API_URL = API_BASE_URL;
 
 export type HowTo = { code: string; params: Record<string, string> };
 export type Visit = {

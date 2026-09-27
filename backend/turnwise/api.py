@@ -455,11 +455,11 @@ async def handoff(
 ):
     """Audio stays on the facility server. Transcription is a local speech
     model when one is installed; until then the note is saved with the audio."""
-    from pathlib import Path
-
     audio_ref = None
     if audio is not None:
-        dest_dir = Path(__file__).resolve().parents[2] / "var" / "handoff"
+        from turnwise.paths import data_dir
+
+        dest_dir = data_dir() / "handoff"
         dest_dir.mkdir(parents=True, exist_ok=True)
         dest = dest_dir / f"{principal.id}-{int(utcnow().timestamp())}.webm"
         dest.write_bytes(await audio.read())
