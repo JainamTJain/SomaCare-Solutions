@@ -1,0 +1,989 @@
+"""Apply events to the pressure budget and build a CNA's shift.
+
+The care decisions in this module are the deterministic engine plus the
+version-1 risk rules. No language model is called.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+
+from sqlalchemy.orm import Session
+
+from turnwise.config import EngineConfig, load_config
+from turnwise.engine.alerts import AlertState, advance_alert, allow_send
+from turnwise.engine.budget import (
+    ALL_AREAS,
+    Budget,
+    LimitContext,
+    PlanView,
+    limit as area_limit,
+    worst_area,
+)
+from turnwise.engine.budget import turn_due
+from turnwise.engine.continence import cumulative_wet, schedule_from_hazard
+from turnwise.engine.risk_rules import ResidentRisk, extra_risk_steps
+from turnwise.engine.scheduler import SchedTask, can_verify_check, merge_tasks, risk_weight
+from turnwise.models import (
+    Alert,
+    Assignment,
+    AuditLog,
+    BradenAssessment,
+    ContinenceObs,
+    Event,
+    Override,
+    Plan,
+    Preference,
+    Resident,
+    ResidentState,
+    RiskFactor,
+    Room,
+    Shift,
+    Staff,
+    Task,
+)
+
+OPEN_ALERT = ("sent", "accepted", "passed", "escalated")
+POSITIONS = {"back", "left", "right", "sitting", "out_of_bed", "unknown", "out_of_room"}
+
+
+def utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _aware(ts: datetime) -> datetime:
+    if ts.tzinfo is None:
+        return ts.replace(tzinfo=timezone.utc)
+    return ts.astimezone(timezone.utc)
+
+
+def cfg() -> EngineConfig:
+    return load_config()
+
+
+def audit(db: Session, staff_id: str | None, action: str, target_type: str, target_id: str, detail: dict):
+    db.add(
+        AuditLog(
+            staff_id=staff_id,
+            action=action,
+            target_type=target_type,
+            target_id=str(target_id),
+            detail=detail,
+        )
+    )
+
+
+def budget_from_state(state: ResidentState) -> Budget:
+    relief = {}
+    for area in ALL_AREAS:
+        raw = (state.relief_since or {}).get(area)
+        relief[area] = datetime.fromisoformat(raw) if raw else None
+    load = {area: float((state.load or {}).get(area, 0.0)) for area in ALL_AREAS}
+    return Budget(load=load, relief_since=relief, last_known=state.last_known or "back")
+
+
+def save_budget(state: ResidentState, budget: Budget) -> None:
+    state.load = {area: budget.load[area] for area in ALL_AREAS}
+    state.relief_since = {
+        area: budget.relief_since[area].isoformat() if budget.relief_since[area] else None
+        for area in ALL_AREAS
+    }
+    state.last_known = budget.last_known
+
+
+def latest_braden(db: Session, resident_id: str) -> BradenAssessment | None:
+    return (
+        db.query(BradenAssessment)
+        .filter(BradenAssessment.resident_id == resident_id)
+        .order_by(BradenAssessment.assessed_at.desc())
+        .first()
+    )
+
+
+def approved_plan(db: Session, resident_id: str) -> Plan | None:
+    return (
+        db.query(Plan)
+        .filter(Plan.resident_id == resident_id, Plan.status == "approved")
+        .order_by(Plan.version.desc())
+        .first()
+    )
+
+
+def resident_risk(db: Session, resident_id: str, state: ResidentState) -> ResidentRisk:
+    braden = latest_braden(db, resident_id)
+    factors = {
+        row.factor
+        for row in db.query(RiskFactor).filter(RiskFactor.resident_id == resident_id)
+        if row.confirmed_by is not None
+    }
+    return ResidentRisk(
+        braden_total=braden.total if braden else 15,
+        braden_nutrition=braden.nutrition if braden else 3,
+        braden_friction_shear=braden.friction_shear if braden else 2,
+        mattress=(approved_plan(db, resident_id).mattress_type if approved_plan(db, resident_id) else "standard")
+        or "standard",
+        factors=factors,
+        night_movements_per_hour=state.night_movements_per_hour,
+    )
+
+
+def plan_view(plan: Plan) -> PlanView:
+    return PlanView(
+        lying_limit_min=plan.lying_limit_min,
+        sitting_limit_min=plan.sitting_limit_min,
+        night_lying_limit_min=plan.night_lying_limit_min,
+        continence_threshold=plan.continence_threshold,
+        version=plan.version,
+        mattress_type=plan.mattress_type or "standard",
+        two_person=plan.two_person,
+    )
+
+
+def is_night(when: datetime, config: EngineConfig) -> bool:
+    local = when.astimezone(ZoneInfo(config.facility_timezone))
+    hour = local.hour
+    start, end = config.night_start_hour, config.night_end_hour
+    if start < end:
+        return start <= hour < end
+    return hour >= start or hour < end
+
+
+def limit_context(db: Session, resident_id: str, state: ResidentState, when: datetime, config: EngineConfig) -> tuple[Plan | None, LimitContext | None, ResidentRisk]:
+    plan = approved_plan(db, resident_id)
+    risk = resident_risk(db, resident_id, state)
+    if plan is None:
+        return None, None, risk
+    position = state.position if state.position not in ("unknown", "out_of_room") else state.last_known
+    ctx = LimitContext(
+        position=position or "back",
+        is_night=is_night(when, config),
+        resident=risk,
+        moist_minutes_24h=state.moist_minutes_24h or 0,
+    )
+    return plan, ctx, risk
+
+
+def actionable_turn(budget: Budget, plan: PlanView, ctx: LimitContext, config: EngineConfig):
+    """Like turn_due, but an area already unloading does not raise a new alert."""
+    candidates = [area for area in ALL_AREAS if budget.relief_since[area] is None]
+    if not candidates:
+        return None, 0.0, False, 0.0
+    ratios = {area: budget.load[area] / area_limit(area, plan, ctx, config) for area in candidates}
+    worst = worst_area(ratios)
+    cap = area_limit(worst, plan, ctx, config)
+    minutes_left = cap - budget.load[worst]
+    return worst, ratios[worst], minutes_left <= config.lead_min, minutes_left
+
+
+def project_state(db: Session, state: ResidentState, now: datetime, config: EngineConfig) -> Budget:
+    now = _aware(now)
+    budget = budget_from_state(state)
+    last = _aware(state.last_ts) if state.last_ts else now
+    dt = (now - last).total_seconds() / 60.0
+    if dt > 0:
+        if state.position == "out_of_room":
+            budget.step("out_of_room", now, dt, config)
+        elif not state.camera_online:
+            # Camera down: keep loading the last known in-bed position.
+            budget.step("unknown", now, dt, config)
+        else:
+            budget.step(state.position or "unknown", now, dt, config)
+        state.last_ts = now
+        save_budget(state, budget)
+    return budget
+
+
+def _assigned_staff(db: Session, resident_id: str, now: datetime) -> str | None:
+    row = (
+        db.query(Assignment)
+        .join(Shift, Shift.id == Assignment.shift_id)
+        .filter(
+            Assignment.resident_id == resident_id,
+            Shift.starts_at <= now,
+            Shift.ends_at >= now,
+        )
+        .first()
+    )
+    return row.staff_id if row else None
+
+
+def _sent_this_hour(db: Session, staff_id: str, now: datetime) -> int:
+    start = now.replace(minute=0, second=0, microsecond=0)
+    return (
+        db.query(Alert)
+        .filter(Alert.staff_id == staff_id, Alert.created_at >= start, Alert.status != "deferred")
+        .count()
+    )
+
+
+def _open_alert_for(db: Session, resident_id: str, kind: str) -> Alert | None:
+    return (
+        db.query(Alert)
+        .join(Task, Task.id == Alert.task_id)
+        .filter(Task.resident_id == resident_id, Task.kind == kind, Alert.status.in_(OPEN_ALERT))
+        .first()
+    )
+
+
+def ensure_turn_alert(db: Session, resident: Resident, state: ResidentState, budget: Budget, now: datetime, config: EngineConfig):
+    plan, ctx, risk = limit_context(db, resident.id, state, now, config)
+    if plan is None or ctx is None:
+        return
+    view = plan_view(plan)
+    worst, ratio, due, minutes_left = actionable_turn(budget, view, ctx, config)
+    if not due or worst is None:
+        return
+    if _open_alert_for(db, resident.id, "turn"):
+        return
+    steps = extra_risk_steps(risk)
+    weight = risk_weight(steps, risk.braden_total)
+    due_at = now + timedelta(minutes=max(minutes_left, 0))
+    task = Task(
+        resident_id=resident.id,
+        kind="turn",
+        due_at=due_at,
+        window_min=int(config.merge_window_min),
+        source="budget",
+        status="open",
+        priority=weight * ratio,
+        detail={
+            "worst_area": worst,
+            "minutes_left": round(minutes_left, 1),
+            "ratio": round(ratio, 3),
+        },
+    )
+    db.add(task)
+    db.flush()
+    staff_id = _assigned_staff(db, resident.id, now)
+    sent = _sent_this_hour(db, staff_id, now) if staff_id else 0
+    if staff_id and not allow_send(sent, config):
+        task.detail = {**(task.detail or {}), "alert_deferred": True}
+        return
+    inputs = {
+        "worst_area": worst,
+        "minutes_left": round(minutes_left, 1),
+        "ratio": round(ratio, 3),
+        "position": state.position,
+        "load": {worst: round(budget.load[worst], 1)},
+        "limit_min": round(area_limit(worst, view, ctx, config), 1),
+        "extra_risk_steps": steps,
+        "multiplier": config.risk_multiplier(steps),
+        "pilot_mode": config.pilot_mode,
+        "braden_total": risk.braden_total,
+    }
+    db.add(
+        Alert(
+            task_id=task.id,
+            staff_id=staff_id,
+            created_at=now,
+            rule="turn_due:minutes_left<=lead_min",
+            inputs=inputs,
+            plan_version=plan.version,
+            model_version=state.model_version,
+            status="sent",
+        )
+    )
+
+
+def _cold_start_bin_prob(interval_min: float, bin_min: float) -> float:
+    """Choose a flat hazard whose median time-to-void matches the nurse interval."""
+    bins = max(interval_min / bin_min, 1)
+    # (1-p)^bins = 0.5
+    return 1 - 0.5 ** (1 / bins)
+
+
+def ensure_continence_task(db: Session, resident: Resident, state: ResidentState, now: datetime, config: EngineConfig):
+    plan = approved_plan(db, resident.id)
+    if plan is None:
+        return
+    if db.query(Task).filter(Task.resident_id == resident.id, Task.kind == "continence", Task.status == "open").first():
+        return
+    bin_min = config.continence_bin_min
+    interval = float(plan.lying_limit_min)
+    p = _cold_start_bin_prob(interval, bin_min)
+    last = _aware(state.last_change_at) if state.last_change_at else now - timedelta(hours=2)
+    elapsed = max((now - last).total_seconds() / 60.0, 0)
+    n_bins = int(elapsed // bin_min) + 8
+    starts = [last + timedelta(minutes=bin_min * (i + 1)) for i in range(n_bins)]
+    probs = [p] * n_bins
+    nurse_checks = []
+    if config.learning_period:
+        # Keep the nurse's fixed cadence, anchored on the last change.
+        cursor = last + timedelta(minutes=interval)
+        while cursor < now + timedelta(hours=8):
+            nurse_checks.append(cursor)
+            cursor += timedelta(minutes=interval)
+    visits = schedule_from_hazard(
+        bin_starts=starts,
+        probs=probs,
+        threshold=plan.continence_threshold,
+        lead_min=config.continence_lead_min,
+        nurse_checks=nurse_checks,
+        learning_period=config.learning_period,
+        last_change=last,
+    )
+    upcoming = [v for v in visits if v.due_at >= now - timedelta(minutes=5)]
+    if not upcoming:
+        return
+    first = upcoming[0]
+    w = first.wet_probability
+    if w == 0:
+        # Nurse check kept during learning. Estimate W at that time for the card.
+        bins_until = max(int((first.due_at - last).total_seconds() / 60.0 / bin_min), 1)
+        w = cumulative_wet([p] * bins_until)
+    db.add(
+        Task(
+            resident_id=resident.id,
+            kind="continence",
+            due_at=first.due_at,
+            window_min=int(config.merge_window_min),
+            source=first.source,
+            status="open",
+            priority=w,
+            detail={
+                "wet_probability": round(w, 2),
+                "reason_code": first.reason_code,
+                "reason_params": first.reason_params,
+                "learning": config.learning_period,
+                "last_change_at": last.isoformat(),
+            },
+        )
+    )
+
+
+def tick_alerts(db: Session, now: datetime, config: EngineConfig) -> None:
+    rows = db.query(Alert).filter(Alert.status.in_(OPEN_ALERT)).all()
+    for row in rows:
+        state = AlertState(
+            id=row.id,
+            task_id=row.task_id or "",
+            staff_id=row.staff_id or "",
+            created_at=_aware(row.created_at),
+            rule=row.rule,
+            inputs=row.inputs or {},
+            plan_version=row.plan_version or 0,
+            model_version=row.model_version or "",
+            status=row.status,
+            accepted_at=_aware(row.accepted_at) if row.accepted_at else None,
+            resolved_at=_aware(row.resolved_at) if row.resolved_at else None,
+            charge_notified=row.charge_notified,
+            resend_count=1 if row.charge_notified else 0,
+        )
+        advance_alert(state, now, config, saw_confirming_event=False)
+        row.status = state.status
+        row.charge_notified = state.charge_notified
+        row.accepted_at = state.accepted_at
+        row.resolved_at = state.resolved_at
+
+
+def resolve_open_care(db: Session, resident_id: str, now: datetime, *, rule: str) -> int:
+    alerts = (
+        db.query(Alert)
+        .join(Task, Task.id == Alert.task_id)
+        .filter(Task.resident_id == resident_id, Alert.status.in_(OPEN_ALERT))
+        .all()
+    )
+    count = 0
+    for alert in alerts:
+        task = db.get(Task, alert.task_id)
+        if task and task.kind not in ("turn", "check", "continence", "care_visit"):
+            continue
+        alert.status = "resolved"
+        alert.resolved_at = now
+        if task and task.status == "open":
+            task.status = "done"
+            task.detail = {**(task.detail or {}), "resolved_by": rule}
+        count += 1
+    return count
+
+
+def apply_event(db: Session, payload: dict) -> dict:
+    config = cfg()
+    ts = _aware(payload["ts"])
+    kind = payload["kind"]
+    if kind not in {
+        "position",
+        "movement",
+        "presence_start",
+        "presence_end",
+        "bed_exit",
+        "bathroom_trip",
+        "bath_start",
+        "bath_end",
+        "turn",
+        "care_visit",
+        "camera_offline",
+        "heartbeat",
+    }:
+        raise ValueError(f"unknown event kind {kind}")
+    room = db.get(Room, payload.get("room_id")) if payload.get("room_id") else None
+    resident = None
+    if payload.get("resident_id"):
+        resident = db.get(Resident, payload["resident_id"])
+    if resident is None and room is not None:
+        resident = db.query(Resident).filter(Resident.room_id == room.id).first()
+    if resident is None:
+        raise LookupError("resident not found for event")
+    if room and not room.analysis_enabled and kind != "camera_offline":
+        db.add(
+            Event(
+                room_id=room.id,
+                resident_id=resident.id,
+                ts=ts,
+                kind=kind,
+                value={"ignored": True, "reason": "analysis_disabled"},
+                confidence=payload.get("confidence"),
+                model_version=payload.get("model_version"),
+            )
+        )
+        return {"ignored": True, "reason": "analysis_disabled"}
+
+    value = payload.get("value") or {}
+    event = Event(
+        room_id=resident.room_id,
+        resident_id=resident.id,
+        ts=ts,
+        kind=kind,
+        value=value,
+        confidence=payload.get("confidence"),
+        model_version=payload.get("model_version"),
+    )
+    db.add(event)
+    state = db.get(ResidentState, resident.id)
+    if state is None:
+        state = ResidentState(
+            resident_id=resident.id,
+            load={area: 0.0 for area in ALL_AREAS},
+            relief_since={area: None for area in ALL_AREAS},
+            last_ts=ts,
+            position="back",
+            last_known="back",
+        )
+        db.add(state)
+        db.flush()
+
+    budget = project_state(db, state, ts, config)
+    resolved = 0
+    if kind == "position":
+        new_pos = value.get("position", "unknown")
+        if new_pos not in POSITIONS:
+            raise ValueError(f"unknown position {new_pos}")
+        previous = state.position
+        persons = int(value.get("persons_in_zone", state.persons_in_zone or 1))
+        state.persons_in_zone = persons
+        if payload.get("confidence") is not None:
+            state.confidence = float(payload["confidence"])
+        state.position = new_pos
+        if new_pos not in ("unknown", "out_of_room"):
+            budget.last_known = new_pos
+            state.last_known = new_pos
+        state.settled = state.confidence >= config.verify_min_confidence and new_pos in {
+            "back",
+            "left",
+            "right",
+        }
+        if payload.get("model_version"):
+            state.model_version = payload["model_version"]
+        if persons >= 2 and new_pos != previous and new_pos in {"back", "left", "right", "sitting"}:
+            resolved = resolve_open_care(db, resident.id, ts, rule="position_with_presence")
+        elif persons == 1 and new_pos != previous and new_pos in {"back", "left", "right", "sitting", "out_of_bed"}:
+            # Self-repositioning relieves the budget by the new position; the
+            # open turn is resolved because the resident moved themselves.
+            resolved = resolve_open_care(db, resident.id, ts, rule="self_reposition")
+    elif kind == "turn":
+        new_pos = value.get("to", state.position)
+        state.position = new_pos
+        state.persons_in_zone = max(state.persons_in_zone or 1, 2)
+        if new_pos in POSITIONS and new_pos not in ("unknown", "out_of_room"):
+            budget.last_known = new_pos
+            state.last_known = new_pos
+        resolved = resolve_open_care(db, resident.id, ts, rule="turn_event")
+    elif kind == "care_visit":
+        resolved = resolve_open_care(db, resident.id, ts, rule="care_visit")
+        if value.get("includes_change"):
+            previous_change = state.last_change_at
+            state.last_change_at = ts
+            db.add(
+                ContinenceObs(
+                    resident_id=resident.id,
+                    kind="change",
+                    ts=ts,
+                    interval_start=_aware(previous_change) if previous_change else None,
+                )
+            )
+    elif kind == "camera_offline":
+        state.camera_online = False
+    elif kind == "heartbeat":
+        state.camera_online = True
+    elif kind == "presence_start":
+        state.persons_in_zone = int(value.get("persons", 2))
+    elif kind == "presence_end":
+        state.persons_in_zone = int(value.get("persons", 1))
+    elif kind == "bed_exit":
+        state.position = "out_of_bed"
+        budget.last_known = state.last_known
+    elif kind == "bathroom_trip":
+        db.add(
+            ContinenceObs(
+                resident_id=resident.id,
+                kind="bathroom_trip",
+                ts=ts,
+                interval_start=_aware(datetime.fromisoformat(value["left_at"])) if value.get("left_at") else None,
+            )
+        )
+    elif kind == "movement":
+        pass
+
+    if kind in {"position", "turn", "bed_exit"} and state.position in {
+        "back",
+        "left",
+        "right",
+        "sitting",
+        "out_of_bed",
+    }:
+        # Zero-length step so areas that just lost load start their relief clock
+        # without waiting for the next observation.
+        budget.step(state.position, ts, 0, config)
+    state.last_ts = ts
+    save_budget(state, budget)
+    if kind not in {"camera_offline"} and state.camera_online:
+        ensure_turn_alert(db, resident, state, budget, ts, config)
+    if kind in {"care_visit", "bathroom_trip", "heartbeat", "position"}:
+        ensure_continence_task(db, resident, state, ts, config)
+    tick_alerts(db, ts, config)
+    db.flush()
+    return {
+        "event_id": event.id,
+        "resident_id": resident.id,
+        "position": state.position,
+        "load": state.load,
+        "resolved_alerts": resolved,
+    }
+
+
+def current_shift(db: Session, now: datetime) -> Shift | None:
+    return (
+        db.query(Shift)
+        .filter(Shift.starts_at <= now, Shift.ends_at >= now)
+        .order_by(Shift.starts_at.desc())
+        .first()
+    )
+
+
+def _prefs(db: Session, resident_id: str, approved_only: bool = True) -> list[dict]:
+    query = db.query(Preference).filter(Preference.resident_id == resident_id)
+    if approved_only:
+        query = query.filter(Preference.approved_by.isnot(None))
+    rows = []
+    for pref in query.all():
+        rows.append(
+            {
+                "id": pref.id,
+                "category": pref.category,
+                "code": pref.code,
+                "params": pref.params or {},
+                "source_type": pref.source_type,
+                "source_excerpt": pref.source_excerpt,
+                "source_date": pref.source_date.isoformat() if pref.source_date else None,
+                "approved": pref.approved_by is not None,
+            }
+        )
+    return rows
+
+
+def how_to_codes(prefs: list[dict], *, two_person: bool) -> list[dict]:
+    turning = [p for p in prefs if p["category"] == "turning" and p.get("code")]
+    comfort = [p for p in prefs if p["category"] == "comfort" and p.get("code")]
+    lines = turning + comfort
+    if two_person and not any(p["code"] == "pref.turn.two_person" for p in lines):
+        lines.append({"code": "pref.turn.two_person", "params": {}})
+    return [{"code": p["code"], "params": p.get("params") or {}} for p in lines[:6]]
+
+
+def refresh_assignment(db: Session, staff_id: str, now: datetime) -> list[Resident]:
+    config = cfg()
+    shift = current_shift(db, now)
+    if shift is None:
+        return []
+    assignments = (
+        db.query(Assignment)
+        .filter(Assignment.shift_id == shift.id, Assignment.staff_id == staff_id)
+        .all()
+    )
+    residents = []
+    for assignment in assignments:
+        resident = db.get(Resident, assignment.resident_id)
+        state = db.get(ResidentState, resident.id)
+        if state is None:
+            continue
+        if not state.camera_online and (now - _aware(state.last_ts)).total_seconds() > config.camera_offline_s:
+            state.camera_online = False
+        budget = project_state(db, state, now, config)
+        if state.camera_online:
+            ensure_turn_alert(db, resident, state, budget, now, config)
+        ensure_continence_task(db, resident, state, now, config)
+        _maybe_verify_checks(db, resident, state, config)
+        residents.append(resident)
+    tick_alerts(db, now, config)
+    db.flush()
+    return residents
+
+
+def _maybe_verify_checks(db: Session, resident: Resident, state: ResidentState, config: EngineConfig) -> None:
+    checks = (
+        db.query(Task)
+        .filter(Task.resident_id == resident.id, Task.kind == "check", Task.status == "open")
+        .all()
+    )
+    open_alert = _open_alert_for(db, resident.id, "turn") is not None
+    in_bed = state.position in {"back", "left", "right", "sitting"}
+    for check in checks:
+        ok = can_verify_check(
+            camera_online=bool(state.camera_online),
+            in_bed=in_bed,
+            settled=bool(state.settled) and not open_alert,
+            confidence=state.confidence or 0,
+            open_alert=open_alert,
+            min_confidence=config.verify_min_confidence,
+        )
+        if ok:
+            check.status = "verified"
+            check.detail = {**(check.detail or {}), "verified_by": "camera"}
+
+
+def staff_can_see(db: Session, principal_id: str, role: str, resident_id: str, now: datetime) -> bool:
+    if role in {"nurse", "charge_nurse", "admin"}:
+        return db.get(Resident, resident_id) is not None
+    shift = current_shift(db, now)
+    if shift is None:
+        return False
+    return (
+        db.query(Assignment)
+        .filter(
+            Assignment.shift_id == shift.id,
+            Assignment.staff_id == principal_id,
+            Assignment.resident_id == resident_id,
+        )
+        .first()
+        is not None
+    )
+
+
+def build_shift(db: Session, staff: Staff, now: datetime) -> dict:
+    now = _aware(now)
+    residents = refresh_assignment(db, staff.id, now)
+    shift = current_shift(db, now)
+    config = cfg()
+    tasks: list[SchedTask] = []
+    resident_payload = {}
+    verified = 0
+    for resident in residents:
+        state = db.get(ResidentState, resident.id)
+        room = db.get(Room, resident.room_id)
+        plan, ctx, risk = limit_context(db, resident.id, state, now, config)
+        budget = budget_from_state(state)
+        why = {"position": state.position, "camera_online": state.camera_online}
+        if plan and ctx:
+            view = plan_view(plan)
+            worst, ratio, due, minutes_left = actionable_turn(budget, view, ctx, config)
+            # Also report the spec turn_due so the trace matches the formula,
+            # including an area that is already unloading.
+            spec_worst, spec_ratio, _spec_due = turn_due(budget, view, ctx, config)
+            why.update(
+                {
+                    "worst_area": worst or spec_worst,
+                    "minutes_left": round(minutes_left, 1) if worst else None,
+                    "ratio": round(ratio, 3) if worst else round(spec_ratio, 3),
+                    "learning": config.learning_period,
+                }
+            )
+        open_tasks = (
+            db.query(Task)
+            .filter(Task.resident_id == resident.id, Task.status == "open")
+            .all()
+        )
+        verified += (
+            db.query(Task)
+            .filter(Task.resident_id == resident.id, Task.status == "verified")
+            .count()
+        )
+        prefs = _prefs(db, resident.id)
+        steps = extra_risk_steps(risk) if plan else 0
+        weight = risk_weight(steps, risk.braden_total)
+        for task in open_tasks:
+            detail = task.detail or {}
+            if detail.get("wet_probability") is not None:
+                why["wet_probability"] = detail["wet_probability"]
+                why["reason_code"] = detail.get("reason_code")
+                why["reason_params"] = detail.get("reason_params")
+                why["last_change_at"] = detail.get("last_change_at")
+            priority = task.priority or 0
+            if task.kind == "turn" and why.get("ratio"):
+                priority = max(priority, weight * why["ratio"])
+            tasks.append(
+                SchedTask(
+                    id=task.id,
+                    resident_id=resident.id,
+                    kind=task.kind,
+                    due_at=_aware(task.due_at or now),
+                    window_min=task.window_min or int(config.merge_window_min),
+                    priority=priority,
+                    room_order=room.hallway_order if room else 0,
+                    source=task.source or "record",
+                )
+            )
+        alerts = (
+            db.query(Alert)
+            .join(Task, Task.id == Alert.task_id)
+            .filter(Task.resident_id == resident.id, Alert.status.in_(OPEN_ALERT), Alert.staff_id == staff.id)
+            .all()
+        )
+        resident_payload[resident.id] = {
+            "resident": resident,
+            "room": room,
+            "state": state,
+            "prefs": prefs,
+            "why": why,
+            "two_person": bool(plan.two_person) if plan else False,
+            "alerts": alerts,
+            "plan": plan,
+        }
+
+    visits = merge_tasks(tasks, config.merge_window_min)
+    for task in tasks:
+        if task.merged_into:
+            row = db.get(Task, task.id)
+            if row and row.merged_into != task.merged_into:
+                row.merged_into = task.merged_into
+    items = []
+    for visit in visits:
+        info = resident_payload[visit.resident_id]
+        resident = info["resident"]
+        room = info["room"]
+        why = dict(info["why"])
+        alert = info["alerts"][0] if info["alerts"] else None
+        items.append(
+            {
+                "visit_id": visit.id,
+                "resident": {
+                    "id": resident.id,
+                    "preferred_name": resident.preferred_name,
+                    "room": room.label if room else "",
+                    "language": resident.language,
+                },
+                "tasks": visit.kinds,
+                "due_at": visit.due_at.isoformat() if visit.due_at else None,
+                "priority": round(visit.priority, 3),
+                "why": why,
+                "how_to": how_to_codes(info["prefs"], two_person=info["two_person"]),
+                "two_person": info["two_person"],
+                "camera_online": info["state"].camera_online,
+                "position": info["state"].position,
+                "alert_id": alert.id if alert else None,
+                "settled": bool(info["state"].settled) and alert is None,
+            }
+        )
+    db.commit()
+    return {
+        "shift_id": shift.id if shift else None,
+        "language": staff.ui_language,
+        "staff": {"id": staff.id, "display_name": staff.display_name, "role": staff.role},
+        "items": items,
+        "verified_checks": verified,
+        "generated_at": now.isoformat(),
+    }
+
+
+def resident_card(db: Session, resident_id: str, now: datetime) -> dict:
+    refresh_resident_only(db, resident_id, now)
+    resident = db.get(Resident, resident_id)
+    state = db.get(ResidentState, resident_id)
+    room = db.get(Room, resident.room_id)
+    plan = approved_plan(db, resident_id)
+    prefs = _prefs(db, resident_id)
+    minutes_in_position = 0
+    if state and state.last_ts:
+        # Load on the current areas is the time in this position since relief.
+        budget = budget_from_state(state)
+        from turnwise.engine.budget import AREAS_BY_POSITION
+
+        areas = AREAS_BY_POSITION.get(state.position, [])
+        if areas:
+            minutes_in_position = max(budget.load[a] for a in areas)
+    return {
+        "resident": {
+            "id": resident.id,
+            "preferred_name": resident.preferred_name,
+            "language": resident.language,
+            "room": room.label if room else "",
+        },
+        "position": state.position if state else "unknown",
+        "minutes_in_position": round(minutes_in_position, 1),
+        "camera_online": state.camera_online if state else False,
+        "preferences": prefs[:6],
+        "how_to": how_to_codes(prefs, two_person=bool(plan.two_person) if plan else False),
+        "two_person": bool(plan.two_person) if plan else False,
+        "continence_threshold": plan.continence_threshold if plan else None,
+    }
+
+
+def refresh_resident_only(db: Session, resident_id: str, now: datetime) -> None:
+    config = cfg()
+    resident = db.get(Resident, resident_id)
+    state = db.get(ResidentState, resident_id)
+    if resident and state:
+        budget = project_state(db, state, now, config)
+        if state.camera_online:
+            ensure_turn_alert(db, resident, state, budget, now, config)
+        ensure_continence_task(db, resident, state, now, config)
+        _maybe_verify_checks(db, resident, state, config)
+        db.commit()
+
+
+def history(db: Session, resident_id: str, days: int, now: datetime) -> dict:
+    start = now - timedelta(days=days)
+    events = (
+        db.query(Event)
+        .filter(Event.resident_id == resident_id, Event.ts >= start)
+        .order_by(Event.ts.desc())
+        .limit(400)
+        .all()
+    )
+    alerts = (
+        db.query(Alert)
+        .join(Task, Task.id == Alert.task_id)
+        .filter(Task.resident_id == resident_id, Alert.created_at >= start)
+        .all()
+    )
+    tasks = (
+        db.query(Task)
+        .filter(Task.resident_id == resident_id, Task.due_at >= start)
+        .order_by(Task.due_at.desc())
+        .all()
+    )
+    return {
+        "resident_id": resident_id,
+        "days": days,
+        "events": [
+            {
+                "id": event.id,
+                "ts": _aware(event.ts).isoformat(),
+                "kind": event.kind,
+                "value": event.value,
+                "confidence": event.confidence,
+                "model_version": event.model_version,
+            }
+            for event in events
+        ],
+        "alerts": [
+            {
+                "id": alert.id,
+                "created_at": _aware(alert.created_at).isoformat(),
+                "rule": alert.rule,
+                "inputs": alert.inputs,
+                "plan_version": alert.plan_version,
+                "model_version": alert.model_version,
+                "status": alert.status,
+                "accepted_at": _aware(alert.accepted_at).isoformat() if alert.accepted_at else None,
+                "resolved_at": _aware(alert.resolved_at).isoformat() if alert.resolved_at else None,
+            }
+            for alert in alerts
+        ],
+        "tasks": [
+            {
+                "id": task.id,
+                "kind": task.kind,
+                "due_at": _aware(task.due_at).isoformat() if task.due_at else None,
+                "status": task.status,
+                "source": task.source,
+                "detail": task.detail,
+            }
+            for task in tasks
+        ],
+    }
+
+
+def continence_view(db: Session, resident_id: str, now: datetime) -> dict:
+    refresh_resident_only(db, resident_id, now)
+    state = db.get(ResidentState, resident_id)
+    plan = approved_plan(db, resident_id)
+    tasks = (
+        db.query(Task)
+        .filter(Task.resident_id == resident_id, Task.kind == "continence", Task.status == "open")
+        .all()
+    )
+    obs = (
+        db.query(ContinenceObs)
+        .filter(ContinenceObs.resident_id == resident_id)
+        .order_by(ContinenceObs.ts.desc())
+        .limit(20)
+        .all()
+    )
+    return {
+        "resident_id": resident_id,
+        "threshold": plan.continence_threshold if plan else None,
+        "learning": cfg().learning_period,
+        "last_change_at": _aware(state.last_change_at).isoformat() if state and state.last_change_at else None,
+        "windows": [
+            {
+                "due_at": _aware(task.due_at).isoformat() if task.due_at else None,
+                "source": task.source,
+                "detail": task.detail,
+            }
+            for task in tasks
+        ],
+        "observations": [
+            {"kind": row.kind, "ts": _aware(row.ts).isoformat()} for row in obs
+        ],
+    }
+
+
+def approve_plan(db: Session, plan_id: str, staff_id: str, body: dict, now: datetime) -> Plan:
+    plan = db.get(Plan, plan_id)
+    if plan is None:
+        raise LookupError("plan not found")
+    suggestion = plan.suggestion or {}
+    if suggestion.get("effect") == "loosen":
+        raise PermissionError("a model suggestion may not loosen a limit; a nurse must set that directly")
+    if body.get("lying_limit_min") is not None:
+        plan.lying_limit_min = int(body["lying_limit_min"])
+    if body.get("sitting_limit_min") is not None:
+        plan.sitting_limit_min = int(body["sitting_limit_min"])
+    if "night_lying_limit_min" in body:
+        raw = body["night_lying_limit_min"]
+        plan.night_lying_limit_min = int(raw) if raw else None
+    if body.get("continence_threshold") is not None:
+        plan.continence_threshold = float(body["continence_threshold"])
+    if body.get("mattress_type"):
+        plan.mattress_type = body["mattress_type"]
+    if body.get("two_person") is not None:
+        plan.two_person = bool(body["two_person"])
+    if not body.get("reason"):
+        raise ValueError("a reason is required")
+    plan.reason = body["reason"]
+    plan.status = "approved"
+    plan.approved_by = staff_id
+    plan.approved_at = now
+    previous = (
+        db.query(Plan)
+        .filter(
+            Plan.resident_id == plan.resident_id,
+            Plan.status == "approved",
+            Plan.id != plan.id,
+        )
+        .all()
+    )
+    for old in previous:
+        old.status = "retired"
+    audit(db, staff_id, "plan.approve", "plan", plan.id, {"version": plan.version, "reason": plan.reason})
+    db.commit()
+    return plan
+
+
+def record_override(db: Session, staff_id: str, target_type: str, target_id: str, reason: str, now: datetime) -> Override:
+    row = Override(target_type=target_type, target_id=target_id, by_staff=staff_id, reason=reason, ts=now)
+    db.add(row)
+    audit(db, staff_id, "override", target_type, target_id, {"reason": reason})
+    db.commit()
+    return row

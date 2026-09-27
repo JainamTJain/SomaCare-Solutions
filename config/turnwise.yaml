@@ -1,0 +1,47 @@
+# Every care-engine constant lives here, is shown to nurses, and is copied
+# onto each alert. Pilot mode refuses any multiplier above 1: camera and
+# model data may only tighten a nurse-approved limit.
+pilot_mode: true
+facility_timezone: America/Los_Angeles
+night_start_hour: 21
+night_end_hour: 7
+
+relief_min: 20
+moist_threshold_min: 120
+m_moisture: 0.85
+limit_floor_min: 60
+lead_min: 15
+merge_window_min: 30
+
+# extra_risk_steps -> multiplier on the nurse-approved limit
+m_risk:
+  0: 1.00
+  1: 0.85
+  2: 0.70
+
+move_threshold: 0.05
+position_hold_s: 30
+position_min_confidence: 0.7
+verify_min_confidence: 0.8
+alert_accept_min: 5
+alert_resolve_min: 20
+alerts_per_cna_per_hour: 8
+presence_hold_s: 10
+bed_exit_absent_s: 20
+bathroom_return_min: 30
+bath_min_presence_s: 300
+keypoint_visibility_min: 0.75
+movement_min_s: 2
+camera_offline_s: 120
+heartbeat_s: 60
+continence_bin_min: 30
+continence_lead_min: 15
+learning_period: true
+sharp_min: 80
+
+features:
+  # Both language-model hooks stay off. The non-AI fallbacks are the
+  # rule-based preference extractor and showing the original note text.
+  llm_preference_extract: false
+  llm_note_translation: false
+  lab_debug_frames: false

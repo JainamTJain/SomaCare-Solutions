@@ -1,0 +1,9 @@
+{
+  "name": "TurnWise",
+  "short_name": "TurnWise",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#12100d",
+  "theme_color": "#12100d",
+  "lang": "en"
+}

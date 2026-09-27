@@ -1,0 +1,9 @@
+# Optional. Training runs on a GPU machine after dataset access is granted.
+# Licenses: PyTorch BSD, torchvision BSD, scikit-learn BSD, xgboost Apache-2.0.
+torch>=2.2
+torchvision>=0.17
+scikit-learn>=1.4
+xgboost>=2.0
+mlflow>=2.13
+onnx>=1.16
+onnxruntime>=1.17
