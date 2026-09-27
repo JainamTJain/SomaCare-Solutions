@@ -1,0 +1,11 @@
+[project]
+name = "turnwise"
+version = "0.1.0"
+description = "TurnWise: camera-verified turning and continence rounds"
+requires-python = ">=3.11"
+readme = "README.md"
+
+[tool.pytest.ini_options]
+pythonpath = ["backend", "ml", "."]
+testpaths = ["backend/tests", "ml/tests", "sim/tests", "edge/tests"]
+addopts = "-q"
