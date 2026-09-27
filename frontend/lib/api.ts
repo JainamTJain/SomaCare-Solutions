@@ -17,6 +17,8 @@ export type Visit = {
   monitoring?: { mode?: string; label?: string | null };
   alert_id: string | null;
   settled: boolean;
+  queue_open?: number;
+  ahead?: { code: string; params: Record<string, string | number> };
 };
 export type TimeSaved = {
   minutes: number;
@@ -60,6 +62,7 @@ export const api = {
   engineer: (token: string) => request("/engineer/board", token),
   director: (token: string) => request("/director/board", token),
   card: (token: string, id: string) => request(`/residents/${id}/card`, token),
+  fullPicture: (token: string, id: string) => request(`/residents/${id}/full-picture`, token),
   history: (token: string, id: string) => request(`/residents/${id}/history?days=7`, token),
   continence: (token: string, id: string) => request(`/residents/${id}/continence`, token),
   accept: (token: string, id: string) => request(`/alerts/${id}/accept`, token, { method: "POST" }),

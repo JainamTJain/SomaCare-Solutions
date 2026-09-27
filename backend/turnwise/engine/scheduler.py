@@ -1,7 +1,8 @@
 """Priority, merging and verified checks.
 
-Priority is risk_weight times the worst pressure ratio. Two tasks for the same
-resident inside the merge window become one visit at the earlier due time.
+Priority starts as risk_weight times the worst pressure ratio, then rises with
+the number of open tasks already on that caregiver's shift. Two tasks for the
+same resident inside the merge window become one visit at the earlier due time.
 """
 
 from __future__ import annotations
@@ -37,6 +38,16 @@ class Visit:
 
 def risk_weight(extra_steps: int, braden_total: int) -> float:
     return 1 + 0.5 * extra_steps + (1.0 if braden_total <= 9 else 0.0)
+
+
+def with_caregiver_load(base_priority: float, open_tasks_for_cna: int, per_open_task: float) -> float:
+    """Raise a visit when this caregiver already has more open tasks waiting.
+
+    The same resident, with the same pressure ratio, scores higher as the
+    count grows. A heavier queue can therefore pass a lighter one.
+    """
+    waiting = max(int(open_tasks_for_cna), 0)
+    return float(base_priority) * (1.0 + float(per_open_task) * waiting)
 
 
 def merge_tasks(tasks: list[SchedTask], merge_window_min: float) -> list[Visit]:

@@ -19,6 +19,7 @@ from turnwise.careflow import (
     approve_plan,
     build_shift,
     continence_view,
+    full_picture,
     history,
     record_override,
     resident_card,
@@ -504,6 +505,20 @@ def card(
     payload = resident_card(db, resident_id, utcnow())
     payload["lang"] = lang or principal.ui_language
     return payload
+
+
+@router.get("/residents/{resident_id}/full-picture")
+def resident_full_picture(
+    resident_id: str,
+    principal: Principal = Depends(get_principal),
+    db: Session = Depends(get_db),
+):
+    if principal.role in {"nurse", "charge_nurse", "admin", "engineer", "director"}:
+        if db.get(Resident, resident_id) is None:
+            raise HTTPException(status_code=404, detail="resident not found")
+    else:
+        _guard_resident(db, principal, resident_id)
+    return full_picture(db, resident_id, utcnow())
 
 
 @router.get("/residents/{resident_id}/history")

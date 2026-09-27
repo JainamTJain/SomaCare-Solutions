@@ -71,6 +71,10 @@ class EngineConfig:
     accept_likely: bool = True
     has_vision: bool = True
     device_offline_s: float = 120
+    # Each open task already on this caregiver's shift multiplies visit priority.
+    caregiver_load_per_open_task: float = 0.08
+    diuretic_window_hours: float = 6
+    sedating_window_hours: float = 8
     features: FeatureFlags = field(default_factory=FeatureFlags)
 
     def risk_multiplier(self, steps: int) -> float:

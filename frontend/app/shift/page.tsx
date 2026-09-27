@@ -169,6 +169,12 @@ function VisitCard({ item, next = false }: { item: Visit; next?: boolean }) {
         {item.two_person && <span className="chip">{t("shift.two")}</span>}
       </div>
       {why && <p style={{ marginBottom: 0 }}>{why}</p>}
+      {item.queue_open != null && (
+        <p className="muted" style={{ marginBottom: 0 }}>
+          {t("shift.queue", { count: item.queue_open })}
+        </p>
+      )}
+      {next && item.ahead && <p>{t(item.ahead.code, item.ahead.params)}</p>}
       {item.monitoring?.mode === "schedule" ? (
         <p className="banner">{item.monitoring.label || t("monitoring.schedule")}</p>
       ) : (

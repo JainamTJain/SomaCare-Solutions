@@ -52,6 +52,10 @@ bed_rule_validated: false
 accept_likely: true
 has_vision: true
 device_offline_s: 120
+# Open tasks already waiting on this caregiver. Priority rises with the count.
+caregiver_load_per_open_task: 0.08
+diuretic_window_hours: 6
+sedating_window_hours: 8
 
 features:
   # Both language-model hooks stay off. The non-AI fallbacks are the
