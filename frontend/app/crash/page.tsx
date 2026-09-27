@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { FirstRun } from "../../components/FirstRun";
 import { Shell } from "../../components/Shell";
 import { HowTo, Shift, api } from "../../lib/api";
 import { renderLine, speak, useLang, useT } from "../../lib/i18n";
@@ -13,10 +14,12 @@ export default function CrashPage() {
   const router = useRouter();
   const [shift, setShift] = useState<Shift | null>(null);
   const [index, setIndex] = useState(0);
+  const [who, setWho] = useState<string | null>(null);
 
   useEffect(() => {
     const session = loadSession();
     if (!session) return;
+    setWho(session.staff.id);
     api.shift(session.token).then(setShift);
   }, []);
 
@@ -25,6 +28,7 @@ export default function CrashPage() {
   if (!shift) {
     return (
       <Shell>
+        {who && <FirstRun role="cna" staffId={who} />}
         <p className="muted">…</p>
       </Shell>
     );
@@ -32,6 +36,7 @@ export default function CrashPage() {
   if (!item) {
     return (
       <Shell>
+        {who && <FirstRun role="cna" staffId={who} />}
         <h1>{t("crash.done")}</h1>
         <button className="big" style={{ marginTop: 16 }} onClick={() => router.push("/shift")}>
           {t("crash.back")}
@@ -43,6 +48,7 @@ export default function CrashPage() {
   const spoken = lines.map((line) => renderLine(t, line.code, line.params)).join(". ");
   return (
     <Shell>
+      {who && <FirstRun role="cna" staffId={who} />}
       <p className="kicker">{t("crash.progress", { now: index + 1, total: items.length })}</p>
       <h1>{item.resident.preferred_name}</h1>
       <p className="muted">{item.resident.room}</p>

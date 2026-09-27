@@ -23,6 +23,7 @@ class FeatureFlags:
     llm_preference_extract: bool = False
     llm_note_translation: bool = False
     lab_debug_frames: bool = False
+    consent_outbound: bool = False
 
 
 @dataclass
@@ -91,6 +92,7 @@ def _coerce(data: dict[str, Any]) -> EngineConfig:
             llm_preference_extract=bool(flags.get("llm_preference_extract", False)),
             llm_note_translation=bool(flags.get("llm_note_translation", False)),
             lab_debug_frames=bool(flags.get("lab_debug_frames", False)),
+            consent_outbound=bool(flags.get("consent_outbound", False)),
         ),
     )
 

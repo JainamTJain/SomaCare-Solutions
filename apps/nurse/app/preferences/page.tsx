@@ -1,7 +1,7 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
+import { Nav } from "../../components/Nav";
 import { call, session } from "../../lib/api";
 
 type Pref = {
@@ -26,12 +26,7 @@ export default function PreferencesPage() {
   }, []);
   return (
     <main>
-      <nav>
-        <Link href="/plans">Plans</Link>
-        <Link href="/preferences">Preferences</Link>
-        <Link href="/residents">History</Link>
-        <Link href="/overrides">Overrides</Link>
-      </nav>
+      <Nav />
       <h1>Preference cards</h1>
       <p className="muted">
         Drafts come from keyword rules. Nothing here reaches a CNA until you approve it. Machine translation stays off.

@@ -1,7 +1,7 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
+import { Nav } from "../../components/Nav";
 import { call, session } from "../../lib/api";
 
 type Plan = {
@@ -20,6 +20,11 @@ export default function PlansPage() {
   const [plans, setPlans] = useState<Plan[]>([]);
   const [reason, setReason] = useState("Approved after review.");
   const [message, setMessage] = useState("");
+  const [tutorial, setTutorial] = useState(0);
+  const [showTutorial, setShowTutorial] = useState(false);
+  useEffect(() => {
+    if (!window.localStorage.getItem("sorety-nurse-tutorial")) setShowTutorial(true);
+  }, []);
   useEffect(() => {
     const auth = session();
     if (!auth) return;
@@ -27,12 +32,33 @@ export default function PlansPage() {
   }, []);
   return (
     <main>
-      <nav>
-        <Link href="/plans">Plans</Link>
-        <Link href="/preferences">Preferences</Link>
-        <Link href="/residents">History</Link>
-        <Link href="/overrides">Overrides</Link>
-      </nav>
+      <Nav />
+      {showTutorial && (
+        <p className="muted">
+          {tutorial === 0 && "You approve every limit. The camera cannot loosen one."}
+          {tutorial === 1 && "Consent is one signature per purpose: position, skin, continence. Skin stays off the floor."}
+          {tutorial === 2 && "An override keeps the reason and who approved it."}
+          <button
+            onClick={() => {
+              if (tutorial < 2) setTutorial(tutorial + 1);
+              else {
+                window.localStorage.setItem("sorety-nurse-tutorial", "1");
+                setShowTutorial(false);
+              }
+            }}
+          >
+            {tutorial < 2 ? "Next" : "Done"}
+          </button>
+          <button
+            onClick={() => {
+              window.localStorage.setItem("sorety-nurse-tutorial", "1");
+              setShowTutorial(false);
+            }}
+          >
+            Skip
+          </button>
+        </p>
+      )}
       <h1>Plans waiting for you</h1>
       <p className="muted">A suggestion can only tighten a limit. You set the number, and you write the reason.</p>
       {plans.length === 0 && <p>Nothing is waiting.</p>}

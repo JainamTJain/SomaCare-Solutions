@@ -398,6 +398,8 @@ def test_engineer_board_is_raw_and_director_does_not_invent_ulcers(client):
     assert elena_cam["infrared"] is True
     assert elena_cam["mic"] == "off"
     assert elena_cam["cloud"] == "off"
+    assert elena_cam["simulated"] is True
+    assert elena_cam["live"] is False
     assert elena_cam["uncertainty_pct"] == 8
     carmen_cam = next(row for row in cameras if row["room"] == "28")
     assert carmen_cam["online"] is False

@@ -6,12 +6,15 @@ version-1 risk rules. No language model is called.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
 from turnwise.config import EngineConfig, load_config
+from turnwise.consent import has_signed, monitoring_state, withhold_camera_fields, withhold_continence_prediction
 from turnwise.daybook import (
     count_verified,
     diet_for_resident,
@@ -439,6 +442,31 @@ def apply_event(db: Session, payload: dict) -> dict:
         resident = db.query(Resident).filter(Resident.room_id == room.id).first()
     if resident is None:
         raise LookupError("resident not found for event")
+    dedup = None
+    if payload.get("device_id"):
+        raw = payload.get("value") or {}
+        dedup = hashlib.sha256(json.dumps(raw, sort_keys=True, default=str).encode()).hexdigest()[:16]
+        priors = (
+            db.query(Event)
+            .filter(
+                Event.device_id == payload["device_id"],
+                Event.resident_id == resident.id,
+                Event.kind == kind,
+                Event.ts == ts,
+            )
+            .all()
+        )
+        prior = next((row for row in priors if (row.value or {}).get("dedup") == dedup), None)
+        if prior is not None:
+            state = db.get(ResidentState, resident.id)
+            return {
+                "event_id": prior.id,
+                "resident_id": resident.id,
+                "position": state.position if state else None,
+                "load": state.load if state else {},
+                "resolved_alerts": 0,
+                "duplicate": True,
+            }
     if room and not room.analysis_enabled and kind != "camera_offline":
         db.add(
             Event(
@@ -456,6 +484,8 @@ def apply_event(db: Session, payload: dict) -> dict:
         return {"ignored": True, "reason": "analysis_disabled"}
 
     value = dict(payload.get("value") or {})
+    if dedup is not None:
+        value["dedup"] = dedup
     source = payload.get("source")
     if source not in {None, "bed_sensor", "vision", "camera", "manual"}:
         raise ValueError(f"unknown event source {source}")
@@ -794,7 +824,11 @@ def build_shift(db: Session, staff: Staff, now: datetime) -> dict:
         room = db.get(Room, resident.room_id)
         plan, ctx, risk = limit_context(db, resident.id, state, now, config)
         budget = budget_from_state(state)
-        why = {"position": state.position, "camera_online": state.camera_online}
+        allowed = has_signed(db, resident.id, "position_monitoring")
+        continence_allowed = has_signed(db, resident.id, "continence_tracking")
+        why = {"camera_online": state.camera_online} if allowed else {}
+        if allowed:
+            why["position"] = state.position
         if plan and ctx:
             view = plan_view(plan)
             worst, ratio, due, minutes_left = actionable_turn(budget, view, ctx, config)
@@ -824,7 +858,7 @@ def build_shift(db: Session, staff: Staff, now: datetime) -> dict:
         weight = risk_weight(steps, risk.braden_total)
         for task in open_tasks:
             detail = task.detail or {}
-            if detail.get("wet_probability") is not None:
+            if continence_allowed and detail.get("wet_probability") is not None:
                 why["wet_probability"] = detail["wet_probability"]
                 why["reason_code"] = detail.get("reason_code")
                 why["reason_params"] = detail.get("reason_params")
@@ -859,6 +893,7 @@ def build_shift(db: Session, staff: Staff, now: datetime) -> dict:
             "two_person": bool(plan.two_person) if plan else False,
             "alerts": alerts,
             "plan": plan,
+            "monitoring": monitoring_state(db, resident.id),
         }
 
     visits = merge_tasks(tasks, config.merge_window_min)
@@ -889,8 +924,9 @@ def build_shift(db: Session, staff: Staff, now: datetime) -> dict:
                 "why": why,
                 "how_to": how_to_codes(info["prefs"], two_person=info["two_person"]),
                 "two_person": info["two_person"],
-                "camera_online": info["state"].camera_online,
-                "position": info["state"].position,
+                "camera_online": info["state"].camera_online if info["monitoring"]["mode"] == "camera" else None,
+                "position": info["state"].position if info["monitoring"]["mode"] == "camera" else None,
+                "monitoring": info["monitoring"],
                 "alert_id": alert.id if alert else None,
                 "settled": bool(info["state"].settled) and alert is None,
             }
@@ -929,27 +965,32 @@ def resident_card(db: Session, resident_id: str, now: datetime) -> dict:
         areas = AREAS_BY_POSITION.get(state.position, [])
         if areas:
             minutes_in_position = max(budget.load[a] for a in areas)
-    return {
+    allowed = has_signed(db, resident_id, "position_monitoring")
+    card = {
         "resident": {
             "id": resident.id,
             "preferred_name": resident.preferred_name,
             "language": resident.language,
             "room": room.label if room else "",
         },
-        "position": state.position if state else "unknown",
-        "minutes_in_position": round(minutes_in_position, 1),
-        "camera_online": state.camera_online if state else False,
+        "monitoring": monitoring_state(db, resident_id),
+        "position": state.position if state and allowed else None,
+        "minutes_in_position": round(minutes_in_position, 1) if allowed else None,
+        "camera_online": state.camera_online if state and allowed else None,
         "preferences": prefs[:6],
         "how_to": how_to_codes(prefs, two_person=bool(plan.two_person) if plan else False),
         "two_person": bool(plan.two_person) if plan else False,
         "continence_threshold": plan.continence_threshold if plan else None,
-        "camera_spectrum": state.camera_spectrum if state else "offline",
-        "confidence": state.confidence if state else 0,
-        "model_version": state.model_version if state else "position-v0.0.0-rules",
+        "camera_spectrum": state.camera_spectrum if state and allowed else None,
+        "confidence": state.confidence if state and allowed else None,
+        "model_version": state.model_version if state and allowed else None,
         "vitals": latest_vitals(db, resident_id),
-        "diet": diet_for_resident(db, resident_id, now, cfg().facility_timezone),
-        "chart_lines": recent_chart_lines(db, [resident_id], now - timedelta(days=7), limit=3),
+        "diet": diet_for_resident(db, resident_id, now, cfg().facility_timezone)
+        if has_signed(db, resident_id, "continence_tracking")
+        else {"applies": False, "is_order": False, "withheld": "consent"},
+        "chart_lines": recent_chart_lines(db, [resident_id], now - timedelta(days=7), limit=3) if allowed else [],
     }
+    return card
 
 
 def refresh_resident_only(db: Session, resident_id: str, now: datetime) -> None:

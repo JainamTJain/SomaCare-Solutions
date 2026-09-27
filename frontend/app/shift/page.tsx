@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { FirstRun } from "../../components/FirstRun";
 import { Shell } from "../../components/Shell";
 import { Shift, Visit, api, cacheShift, cachedShift } from "../../lib/api";
 import { renderLine, useT } from "../../lib/i18n";
@@ -15,10 +16,18 @@ export default function ShiftPage() {
   const t = useT();
   const [shift, setShift] = useState<Shift | null>(null);
   const [offline, setOffline] = useState(false);
+  const [who, setWho] = useState<{ id: string; role: string } | null>(null);
+  const [firstShift, setFirstShift] = useState(false);
 
   useEffect(() => {
     const session = loadSession();
     if (!session) return;
+    setWho({ id: session.staff.id, role: session.staff.role });
+    const firstKey = `sorety-first-shift-${session.staff.id}`;
+    if (!window.localStorage.getItem(firstKey)) {
+      window.localStorage.setItem(firstKey, "1");
+      setFirstShift(true);
+    }
     api
       .shift(session.token)
       .then(async (body) => {
@@ -40,6 +49,7 @@ export default function ShiftPage() {
   return (
     <Shell>
       <p className="kicker">{t("app.name")}</p>
+      {who && <FirstRun role="cna" staffId={who.id} />}
       <div className="spread">
         <h1>{t("nav.shift")}</h1>
         <Link href="/settings" className="muted">
@@ -47,7 +57,7 @@ export default function ShiftPage() {
         </Link>
       </div>
       {offline && <p className="banner">{t("shift.offline")}</p>}
-      <Saved shift={shift} />
+      <Saved shift={shift} firstShift={firstShift} />
       <p className="section-label due">{due[0] ? t("shift.next") : t("shift.needsYou")}</p>
       <div className="stack">
         {due.length === 0 && <p>{t("shift.empty")}</p>}
@@ -71,7 +81,7 @@ export default function ShiftPage() {
   );
 }
 
-function Saved({ shift }: { shift: Shift | null }) {
+function Saved({ shift, firstShift }: { shift: Shift | null; firstShift: boolean }) {
   const t = useT();
   const saved = shift?.time_saved;
   const minutes = saved?.minutes || 0;
@@ -82,6 +92,7 @@ function Saved({ shift }: { shift: Shift | null }) {
       : t("shift.saved", { minutes });
   return (
     <section className="saved">
+      {firstShift && <p className="banner">{t("shift.firstProof")}</p>}
       <strong>{label}</strong>
       <p className="muted" style={{ marginBottom: 0 }}>
         {t("shift.savedHint")} {t("calendar.same")}
@@ -158,7 +169,11 @@ function VisitCard({ item, next = false }: { item: Visit; next?: boolean }) {
         {item.two_person && <span className="chip">{t("shift.two")}</span>}
       </div>
       {why && <p style={{ marginBottom: 0 }}>{why}</p>}
-      {!item.camera_online && <p className="banner">{t("shift.cameraOff")}</p>}
+      {item.monitoring?.mode === "schedule" ? (
+        <p className="banner">{item.monitoring.label || t("monitoring.schedule")}</p>
+      ) : (
+        item.camera_online === false && <p className="banner">{t("shift.cameraOff")}</p>
+      )}
       {item.how_to.length > 0 && (
         <ul className="how">
           {item.how_to.slice(0, 3).map((line) => (

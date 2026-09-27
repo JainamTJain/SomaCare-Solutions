@@ -9,7 +9,7 @@ ALTER TABLE event ADD CONSTRAINT event_kind_check CHECK (kind IN (
 ));
 CREATE TABLE IF NOT EXISTS device (
   id TEXT PRIMARY KEY,
-  kind TEXT CHECK (kind IN ('bed_sensor','vision_partner','vision_edge','camera')),
+  kind TEXT CHECK (kind IN ('bed_sensor','vision_partner','vision_edge','camera','skin_camera')),
   room_id UUID REFERENCES room,
   resident_id UUID REFERENCES resident,
   installed_at TIMESTAMPTZ,

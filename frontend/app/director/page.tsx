@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { FirstRun } from "../../components/FirstRun";
 import { api } from "../../lib/api";
 import { clearSession, loadSession } from "../../lib/session";
 
@@ -50,6 +51,7 @@ export default function DirectorPage() {
   const router = useRouter();
   const [board, setBoard] = useState<Board | null>(null);
   const [error, setError] = useState("");
+  const [who, setWho] = useState<string | null>(null);
 
   useEffect(() => {
     const session = loadSession();
@@ -57,6 +59,7 @@ export default function DirectorPage() {
       router.replace("/");
       return;
     }
+    setWho(session.staff.id);
     if (session.staff.role !== "director" && session.staff.role !== "admin") {
       setError("This view is for the director login.");
       return;
@@ -82,6 +85,7 @@ export default function DirectorPage() {
   const saved = board?.time_saved;
   return (
     <main className="desk">
+      {who && <FirstRun role="director" staffId={who} />}
       <p className="kicker">Sorety</p>
       <div className="spread">
         <h1>Director</h1>

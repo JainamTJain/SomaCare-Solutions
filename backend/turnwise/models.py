@@ -83,6 +83,8 @@ class StaffCredential(Base):
     staff_id: Mapped[str] = mapped_column(ForeignKey("staff.id"), primary_key=True)
     pin_hash: Mapped[str] = mapped_column(String(128))
     pin_salt: Mapped[str] = mapped_column(String(64))
+    failed_attempts: Mapped[int] = mapped_column(Integer, default=0)
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class Shift(Base):
@@ -347,6 +349,37 @@ class Device(Base):
     last_seen: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class PoaContact(Base):
+    __tablename__ = "poa_contact"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    resident_id: Mapped[str] = mapped_column(ForeignKey("resident.id"))
+    full_name: Mapped[str] = mapped_column(Text)
+    relationship: Mapped[str] = mapped_column(Text, default="resident")
+    email: Mapped[str | None] = mapped_column(Text, nullable=True)
+    phone: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_primary: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class ConsentRecord(Base):
+    """One scope, one decision. explanation_shown is the exact text that was displayed."""
+
+    __tablename__ = "consent_record"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    resident_id: Mapped[str] = mapped_column(ForeignKey("resident.id"))
+    scope: Mapped[str] = mapped_column(String(32))
+    status: Mapped[str] = mapped_column(String(16), default="requested")
+    explanation_shown: Mapped[str] = mapped_column(Text)
+    form_version: Mapped[int] = mapped_column(Integer, default=1)
+    requested_by: Mapped[str | None] = mapped_column(ForeignKey("staff.id"), nullable=True)
+    requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    sent_to: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    signed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    signature_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class HomeInstall(Base):

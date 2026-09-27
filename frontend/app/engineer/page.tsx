@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { FirstRun } from "../../components/FirstRun";
 import { PositionMark } from "../../components/PositionMark";
 import { api } from "../../lib/api";
 import { clearSession, loadSession } from "../../lib/session";
@@ -38,6 +39,7 @@ type ResidentRow = {
     blocked_by: string[];
   };
   open_alert: { rule: string; status: string; inputs: Record<string, unknown> } | null;
+  monitoring?: { mode?: string; label?: string | null };
 };
 
 type CameraRow = {
@@ -54,6 +56,9 @@ type CameraRow = {
   uncertainty_pct: number | null;
   mic: string | null;
   cloud: string | null;
+  simulated?: boolean;
+  live?: boolean;
+  monitoring?: string;
 };
 
 type InstallStep = { id: string; label: string; done: boolean };
@@ -81,6 +86,7 @@ export default function EngineerPage() {
   const [board, setBoard] = useState<Board | null>(null);
   const [error, setError] = useState("");
   const [open, setOpen] = useState<string | null>(null);
+  const [who, setWho] = useState<string | null>(null);
 
   useEffect(() => {
     const session = loadSession();
@@ -88,6 +94,7 @@ export default function EngineerPage() {
       router.replace("/");
       return;
     }
+    setWho(session.staff.id);
     if (session.staff.role !== "engineer" && session.staff.role !== "admin") {
       setError("This view is for the engineer login.");
       return;
@@ -113,6 +120,7 @@ export default function EngineerPage() {
   return (
     <main className="desk">
       <p className="kicker">Sorety</p>
+      {who && <FirstRun role="engineer" staffId={who} />}
       <div className="spread">
         <h1>Engineer</h1>
         <button
@@ -159,7 +167,10 @@ export default function EngineerPage() {
                 <td>
                   {camera.label}
                   <div className="muted">
-                    {camera.online ? "online" : "offline"} · mic {camera.mic || "off"} · cloud {camera.cloud || "off"}
+                    {camera.online ? "online" : "offline"}
+                  {camera.simulated || camera.live === false ? " · simulated" : ""}
+                  {camera.monitoring === "schedule" ? " · monitored by schedule, not camera" : ""} · mic {camera.mic || "off"} · cloud{" "}
+                  {camera.cloud || "off"}
                   </div>
                 </td>
                 <td>{camera.infrared ? "yes" : camera.spectrum}</td>
@@ -196,30 +207,44 @@ export default function EngineerPage() {
             </tr>
           </thead>
           <tbody>
-            {(board?.residents || []).map((row) => (
+            {(board?.residents || []).map((row) => {
+              const scheduled = row.monitoring?.mode === "schedule";
+              return (
               <tr key={row.resident_id} onClick={() => setOpen(open === row.resident_id ? null : row.resident_id)}>
                 <td>
                   {row.room}
                   <div>{row.name}</div>
                 </td>
                 <td>
-                  <PositionMark position={row.position} compact />
-                  <div>
-                    {row.position} · {row.camera_spectrum}
-                    {row.camera_online ? "" : " · offline"}
-                  </div>
-                  <div className="muted">{row.model_version}</div>
+                  {scheduled ? (
+                    <div>{row.monitoring?.label}</div>
+                  ) : (
+                    <>
+                      <PositionMark position={row.position} compact />
+                      <div>
+                        {row.position} · {row.camera_spectrum}
+                        {row.camera_online ? "" : " · offline"}
+                      </div>
+                      <div className="muted">{row.model_version}</div>
+                    </>
+                  )}
                 </td>
-                <td>{row.confidence_pct}%</td>
-                <td>{row.uncertainty_pct}%</td>
+                <td>{scheduled || row.confidence_pct == null ? "—" : `${row.confidence_pct}%`}</td>
+                <td>{scheduled || row.uncertainty_pct == null ? "—" : `${row.uncertainty_pct}%`}</td>
                 <td>
-                  {row.worst_area || "—"} {row.worst_ratio ?? "—"}
-                  <div className={row.worst_ratio !== null && row.worst_ratio >= 0.8 ? "meter hot" : "meter"}>
-                    <span style={{ width: `${Math.min((row.worst_ratio || 0) * 100, 100)}%` }} />
-                  </div>
-                  <div className="muted">
-                    steps {row.extra_risk_steps} · ×{row.risk_multiplier} · Braden {row.braden_total}
-                  </div>
+                  {scheduled ? (
+                    "—"
+                  ) : (
+                    <>
+                      {row.worst_area || "—"} {row.worst_ratio ?? "—"}
+                      <div className={row.worst_ratio !== null && row.worst_ratio >= 0.8 ? "meter hot" : "meter"}>
+                        <span style={{ width: `${Math.min((row.worst_ratio || 0) * 100, 100)}%` }} />
+                      </div>
+                      <div className="muted">
+                        steps {row.extra_risk_steps} · ×{row.risk_multiplier} · Braden {row.braden_total}
+                      </div>
+                    </>
+                  )}
                 </td>
                 <td>
                   {row.continence.wet_probability === null ? "—" : row.continence.wet_probability}
@@ -228,17 +253,27 @@ export default function EngineerPage() {
                   {row.continence.learning && <div className="muted">learning</div>}
                 </td>
                 <td>
-                  {row.visual_check.would_verify ? "pass" : "fail"}
-                  <div className="muted">
-                    {row.visual_check.confidence_pct}% confident · {row.visual_check.uncertainty_pct}% uncertain · gate{" "}
-                    {row.visual_check.gate_pct}%
-                  </div>
-                  {row.visual_check.blocked_by.length > 0 && (
-                    <div className="muted">{row.visual_check.blocked_by.join(", ")}</div>
+                  {scheduled ? (
+                    <>
+                      withheld
+                      <div className="muted">{row.visual_check.blocked_by.join(", ")}</div>
+                    </>
+                  ) : (
+                    <>
+                      {row.visual_check.would_verify ? "pass" : "fail"}
+                      <div className="muted">
+                        {row.visual_check.confidence_pct}% confident · {row.visual_check.uncertainty_pct}% uncertain · gate{" "}
+                        {row.visual_check.gate_pct}%
+                      </div>
+                      {row.visual_check.blocked_by.length > 0 && (
+                        <div className="muted">{row.visual_check.blocked_by.join(", ")}</div>
+                      )}
+                    </>
                   )}
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>

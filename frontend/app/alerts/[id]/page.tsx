@@ -16,10 +16,16 @@ export default function AlertPage() {
   const [shift, setShift] = useState<Shift | null>(null);
   const [card, setCard] = useState<Record<string, unknown> | null>(null);
   const [note, setNote] = useState("");
+  const [firstTip, setFirstTip] = useState(false);
 
   useEffect(() => {
     const session = loadSession();
     if (!session) return;
+    const tipKey = `sorety-alert-tip-${session.staff.id}`;
+    if (!window.localStorage.getItem(tipKey)) {
+      window.localStorage.setItem(tipKey, "1");
+      setFirstTip(true);
+    }
     api.shift(session.token).then(setShift);
   }, []);
 
@@ -54,6 +60,7 @@ export default function AlertPage() {
     <Shell>
       <p className="kicker">{item.resident.room}</p>
       <h1>{item.resident.preferred_name}</h1>
+      {firstTip && <p className="banner">{t("alert.first")}</p>}
       <ResidentContext card={card} />
       <div className="chips" style={{ margin: "12px 0" }}>
         {item.tasks.map((task) => (
