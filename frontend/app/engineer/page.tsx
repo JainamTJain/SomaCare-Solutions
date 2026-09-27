@@ -63,6 +63,7 @@ type Board = {
   position_model: string;
   position_model_note: string;
   verify_gate: number;
+  gate1?: { status: string; note?: string; per_side_under_blanket?: string };
   sensing?: {
     default: string;
     computer: string;
@@ -124,6 +125,10 @@ export default function EngineerPage() {
           Sign out
         </button>
       </div>
+      <p className="banner">
+        Gate 1 has not been run. A blanket blocks near-infrared the same way it blocks visible light. A covered
+        side-of-body label does not reset the pressure timer.
+      </p>
       <p className="muted">{board?.position_model_note}</p>
       <p className="muted">
         Live. Refreshes every 2 seconds. Model {board?.position_model}. Visual-check gate{" "}

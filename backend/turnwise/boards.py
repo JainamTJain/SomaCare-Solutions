@@ -24,6 +24,7 @@ from turnwise.careflow import (
 from turnwise.config import EngineConfig, load_config
 from turnwise.daybook import time_saved
 from turnwise.engine.budget import ALL_AREAS
+from turnwise.engine.gate1 import live_status
 from turnwise.engine.budget import limit as area_limit
 from turnwise.engine.risk_rules import extra_risk_steps
 from turnwise.engine.scheduler import SchedTask, can_verify_check, merge_tasks
@@ -258,10 +259,11 @@ def engineer_board(db: Session, now: datetime) -> dict:
         "pilot_mode": config.pilot_mode,
         "position_model": "position-v0.0.0-rules",
         "position_model_note": (
-            "Shoulder-hip rule on the home computer, reading an infrared baby monitor. "
-            "Not a language model. Not trained on SLP. Color frames are rejected. Frames stay in the house."
+            "Shoulder-hip rule on an infrared baby monitor. Not a language model. Not trained on SLP. "
+            "Color frames are rejected. A blanket blocks this camera, so a covered side-of-body label does not reset a timer. Gate 1 has not been run."
         ),
         "verify_gate": config.verify_min_confidence,
+        "gate1": live_status(),
         "sensing": {
             "default": "infrared baby monitor",
             "computer": "one shared home computer",
@@ -269,6 +271,7 @@ def engineer_board(db: Session, now: datetime) -> dict:
             "frames_leave_home": False,
             "microphone": "off",
             "cloud": "off",
+            "per_side_under_blanket": "not_claimed",
         },
         "cameras": camera_table(db, now),
         "install": install_checklist(db),
@@ -324,6 +327,14 @@ def director_board(db: Session, now: datetime) -> dict:
             "infrared_online": len(online),
             "residents": len(rows),
             "mean_uncertainty_pct": mean_uncertainty,
+        },
+        "position_claim": {
+            "under_blanket": "not_claimed",
+            "gate1": "not_run",
+            "note": (
+                "A near-infrared camera does not see through a blanket. "
+                "Side of body under a cover is not claimed."
+            ),
         },
         "incontinence": {
             "above_nurse_threshold": len(above),

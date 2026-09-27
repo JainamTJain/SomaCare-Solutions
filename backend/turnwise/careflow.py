@@ -21,6 +21,7 @@ from turnwise.daybook import (
 )
 from turnwise.engine.alerts import AlertState, advance_alert, allow_send
 from turnwise.engine.fusion import BedMovement, VisionChange, classify_reposition, resets_timer
+from turnwise.engine.gate1 import live_status
 from turnwise.engine.budget import (
     ALL_AREAS,
     Budget,
@@ -474,8 +475,18 @@ def apply_event(db: Session, payload: dict) -> dict:
         bed = None
         if value.get("bed_magnitude") is not None:
             bed = BedMovement(magnitude=float(value["bed_magnitude"]), duration_s=float(value.get("bed_duration_s") or 0))
-        fusion = classify_reposition(vision, bed, config, has_vision=True)
+        cover = value.get("cover") or "unknown"
+        if cover not in {"none", "sheet", "blanket", "unknown"}:
+            raise ValueError(f"unknown cover {cover}")
+        fusion = classify_reposition(vision, bed, config, has_vision=True, cover=cover)
+        value["cover"] = cover
         value["fusion"] = fusion
+        value["gate1"] = live_status()["status"]
+        if cover != "none":
+            value["fusion_reason"] = "cover_unvalidated"
+            value["claim"] = "withheld"
+        else:
+            value["claim"] = "per_side_unvalidated"
     skip_clock = fusion is not None and not resets_timer(str(fusion), config)
     event = Event(
         room_id=resident.room_id,

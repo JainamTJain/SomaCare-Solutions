@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from edge.pipeline.run import observe
+from turnwise.engine.gate1 import live_status
 from edge.pipeline.smooth import PositionSmoother
 
 
@@ -53,6 +54,8 @@ def _stamp(event: dict, monitor: Monitor, *, fps: float | None, latency_ms: floa
     value = dict(event.get("value") or {})
     value["mic"] = "off"
     value["cloud"] = "off"
+    value.setdefault("cover", "unknown")
+    value["gate1"] = live_status()["status"]
     if fps is not None:
         value["fps"] = round(fps, 2)
     if latency_ms is not None:

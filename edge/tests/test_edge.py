@@ -167,6 +167,8 @@ def test_six_baby_monitors_emit_events_and_write_nothing(tmp_path, monkeypatch):
         assert events[0]["source"] == "camera"
         assert events[0]["device_id"] == monitor.device_id
         assert events[0]["value"]["camera_spectrum"] == "infrared"
+        assert events[0]["value"]["cover"] == "unknown"
+        assert events[0]["value"]["gate1"] == "not_run"
         assert events[0]["value"]["mic"] == "off"
         assert "frame" not in events[0]
         assert "audio" not in events[0]

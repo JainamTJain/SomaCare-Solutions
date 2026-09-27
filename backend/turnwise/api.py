@@ -138,6 +138,8 @@ def health():
         "pilot_mode": config.pilot_mode,
         "llm_preference_extract": config.features.llm_preference_extract,
         "llm_note_translation": config.features.llm_note_translation,
+        "gate1": "not_run",
+        "resident_data": "demo_only",
     }
 
 
