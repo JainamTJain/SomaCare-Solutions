@@ -136,6 +136,24 @@ class RiskFactor(Base):
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class MedicationLog(Base):
+    """A dose already on the chart. Diuretic feeds continence features.
+    Sedating feeds one extra risk step. Neither is inferred from the name."""
+
+    __tablename__ = "medication_log"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    resident_id: Mapped[str] = mapped_column(ForeignKey("resident.id"))
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    medication_name: Mapped[str] = mapped_column(Text)
+    dose: Mapped[str | None] = mapped_column(Text, nullable=True)
+    route: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_diuretic: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_sedating: Mapped[bool] = mapped_column(Boolean, default=False)
+    given_by: Mapped[str | None] = mapped_column(ForeignKey("staff.id"), nullable=True)
+    scheduled: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 class Plan(Base):
     __tablename__ = "plan"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)

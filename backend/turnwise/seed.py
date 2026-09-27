@@ -21,6 +21,7 @@ from turnwise.models import (
     Event,
     Facility,
     HomeInstall,
+    MedicationLog,
     MorningVital,
     Plan,
     Preference,
@@ -496,6 +497,51 @@ def seed_if_empty(db: Session) -> None:
                     source="nurse_schedule",
                     status="open",
                     detail={"fixed_schedule": True},
+                )
+            )
+        if spec["name"] == "James Okonkwo":
+            db.add(
+                MedicationLog(
+                    resident_id=resident.id,
+                    ts=now - timedelta(hours=2),
+                    medication_name="furosemide",
+                    dose="20 mg",
+                    route="oral",
+                    is_diuretic=True,
+                    is_sedating=False,
+                    given_by=nurse.id,
+                    scheduled=True,
+                    notes="Demo chart dose. Not a prescription.",
+                )
+            )
+        if spec["name"] == "Rosa Delgado":
+            db.add(
+                MedicationLog(
+                    resident_id=resident.id,
+                    ts=now - timedelta(hours=3),
+                    medication_name="lorazepam",
+                    dose="0.5 mg",
+                    route="oral",
+                    is_diuretic=False,
+                    is_sedating=True,
+                    given_by=nurse.id,
+                    scheduled=True,
+                    notes="Demo chart dose. The sedating flag is on the row, not guessed from the name.",
+                )
+            )
+        if spec["name"] == "Harold Bennett":
+            db.add(
+                MedicationLog(
+                    resident_id=resident.id,
+                    ts=now - timedelta(hours=12),
+                    medication_name="furosemide",
+                    dose="20 mg",
+                    route="oral",
+                    is_diuretic=True,
+                    is_sedating=False,
+                    given_by=nurse.id,
+                    scheduled=True,
+                    notes="Older than the 6 hour window.",
                 )
             )
         chart = MORNING_CHART.get(spec["name"])

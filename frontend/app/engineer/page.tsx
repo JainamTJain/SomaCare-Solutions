@@ -81,11 +81,59 @@ type Board = {
   residents: ResidentRow[];
 };
 
+function labeled(block: unknown) {
+  const row = (block || {}) as { empty?: boolean; withheld?: string | null; rows?: unknown[] };
+  if (row.withheld) return "withheld until consent";
+  if (row.empty) return "none on file";
+  return `${row.rows?.length ?? 0} on file`;
+}
+
+function FullPicture({ picture }: { picture: Record<string, unknown> }) {
+  const risk = picture.risk as { extra_steps?: number; weight?: number; factors?: string[]; sedating_medication?: boolean } | undefined;
+  const features = picture.continence_features as { diuretic?: number | null; withheld?: string | null } | undefined;
+  const timeline = picture.timeline as { sources?: Record<string, { empty?: boolean; withheld?: string | null }> } | undefined;
+  const meds = (picture.medications as { rows?: { medication_name: string; is_diuretic: boolean; is_sedating: boolean; in_diuretic_window?: boolean; in_sedating_window?: boolean }[] } | undefined)?.rows || [];
+  return (
+    <section className="saved">
+      <h2>{String(picture.name || "Resident")}</h2>
+      <p>
+        Risk steps {risk?.extra_steps ?? "—"} · weight {risk?.weight ?? "—"}
+        {risk?.sedating_medication ? " · sedating dose in the window" : ""}
+      </p>
+      <p className="muted">Factors: {(risk?.factors || []).join(", ") || "none"}</p>
+      <p>Diagnoses: {labeled(picture.risk_factors)}</p>
+      <p>Braden: {labeled(picture.braden)}</p>
+      <p>Medications: {labeled(picture.medications)}</p>
+      {meds.map((row) => (
+        <p key={row.medication_name} className="muted">
+          {row.medication_name}
+          {row.is_diuretic ? " · diuretic" : ""}
+          {row.in_diuretic_window ? " · inside 6 hours" : ""}
+          {row.is_sedating ? " · sedating" : ""}
+          {row.in_sedating_window ? " · inside the sedating window" : ""}
+        </p>
+      ))}
+      <p>
+        Continence diuretic feature: {features?.withheld ? "withheld until consent" : features?.diuretic ?? "—"}
+      </p>
+      <p className="muted">
+        Timeline{" "}
+        {timeline?.sources
+          ? Object.entries(timeline.sources)
+              .map(([name, source]) => `${name} ${source.withheld ? "withheld" : source.empty ? "empty" : "filled"}`)
+              .join(" · ")
+          : "—"}
+      </p>
+    </section>
+  );
+}
+
 export default function EngineerPage() {
   const router = useRouter();
   const [board, setBoard] = useState<Board | null>(null);
   const [error, setError] = useState("");
   const [open, setOpen] = useState<string | null>(null);
+  const [picture, setPicture] = useState<Record<string, unknown> | null>(null);
   const [who, setWho] = useState<string | null>(null);
 
   useEffect(() => {
@@ -210,7 +258,15 @@ export default function EngineerPage() {
             {(board?.residents || []).map((row) => {
               const scheduled = row.monitoring?.mode === "schedule";
               return (
-              <tr key={row.resident_id} onClick={() => setOpen(open === row.resident_id ? null : row.resident_id)}>
+              <tr key={row.resident_id} onClick={() => {
+                const next = open === row.resident_id ? null : row.resident_id;
+                setOpen(next);
+                setPicture(null);
+                if (!next) return;
+                const session = loadSession();
+                if (!session) return;
+                api.fullPicture(session.token, next).then((body) => setPicture(body as Record<string, unknown>));
+              }}>
                 <td>
                   {row.room}
                   <div>{row.name}</div>
@@ -277,9 +333,7 @@ export default function EngineerPage() {
           </tbody>
         </table>
       </div>
-      {open && board && (
-        <pre className="mono">{JSON.stringify(board.residents.find((row) => row.resident_id === open), null, 2)}</pre>
-      )}
+      {open && picture && <FullPicture picture={picture} />}
     </main>
   );
 }

@@ -67,6 +67,19 @@ CREATE TABLE risk_factor (
   confirmed_by UUID REFERENCES staff,
   confirmed_at TIMESTAMPTZ
 );
+CREATE TABLE medication_log (
+  id UUID PRIMARY KEY,
+  resident_id UUID REFERENCES resident,
+  ts TIMESTAMPTZ,
+  medication_name TEXT,
+  dose TEXT,
+  route TEXT,
+  is_diuretic BOOLEAN DEFAULT FALSE,
+  is_sedating BOOLEAN DEFAULT FALSE,
+  given_by UUID REFERENCES staff,
+  scheduled BOOLEAN,
+  notes TEXT
+);
 CREATE TABLE plan (
   id UUID PRIMARY KEY,
   resident_id UUID REFERENCES resident,
