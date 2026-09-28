@@ -1,4 +1,4 @@
-# Sorety
+# SomaCare Solutions
 
 Camera-verified turning and continence rounds. Nurses set every limit. CNAs log nothing for routine care. The care engine is rules and statistical models. It does not call a language model to score, schedule, or alert.
 
