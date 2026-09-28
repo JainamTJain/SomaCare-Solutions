@@ -22,3 +22,19 @@ ml/somacare_ml/data/
 ml/somacare_ml/models/
 *.onnx
 !edge/models/.gitkeep
+# --- SomaCare media and model rules ---
+__pycache__/
+.pytest_cache/
+backend/models/
+backend/data/
+backend/clips/
+*.pt
+*.pth
+*.task
+*.mov
+*.MOV
+demo_media/video/raw/
+# block videos everywhere except the compressed demo clip and the one the site shows
+*.mp4
+!demo_media/video/bed1.mp4
+!web/public/demo/bed1-demo.mp4
