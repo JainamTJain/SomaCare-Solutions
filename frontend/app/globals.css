@@ -268,6 +268,14 @@ textarea {
   vertical-align: top;
 }
 .raw th { color: var(--muted); font-weight: 550; }
+.scroll-x { width: 100%; max-width: 100%; overflow-x: auto; }
+.sim-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.sim-card.hot { border-color: var(--clay); }
+.posbar { position: relative; height: 10px; background: var(--chip); border-radius: 99px; margin: 10px 0 4px; }
+.posbar i { display: block; height: 100%; background: var(--sage); border-radius: 99px; }
+.posbar.amber i { background: var(--brass); }
+.posbar.red i { background: var(--clay); }
+.posbar .tick { position: absolute; top: -3px; width: 2px; height: 16px; background: var(--ink); }
 .meter { height: 8px; background: var(--chip); border-radius: 99px; overflow: hidden; min-width: 88px; }
 .meter span { display: block; height: 100%; background: var(--brass); }
 .meter.hot span { background: var(--clay); }

@@ -13,8 +13,8 @@ jobs:
       - run: pip install -r requirements.txt
       - run: pytest
         env:
-          PYTHONPATH: backend:ml:.
+          PYTHONPATH: backend:ml:ml/somacare_ml:.
       - run: python scripts/export_openapi.py --check
         env:
-          PYTHONPATH: backend:ml:.
+          PYTHONPATH: backend:ml:ml/somacare_ml:.
           SOMACARE_CARE_CLOCK: "0"

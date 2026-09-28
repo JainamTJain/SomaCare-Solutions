@@ -54,10 +54,10 @@ PYTHONPATH=backend:. python -m edge.demo --source scripted
 ## Tests
 
 ```bash
-PYTHONPATH=backend:ml:. pytest
+PYTHONPATH=backend:ml:ml/somacare_ml:. pytest
 ```
 
-The continence test refits a small hazard model and takes a few seconds. The 14-day hall replay uses the real budget, limits, and alert budget.
+The continence test refits a small hazard model and takes a few seconds. The 14-day hall replay uses the real budget, limits, and alert budget. `ml/somacare_ml` adds the predictive package: turn confirmation, a safety simulation, a continence hazard model, patterns, and an overhead position classifier. Those position numbers are synthetic. The live edge label stays `position-v0.0.0-rules`. A fictional six-bed night, with the same rules, is at `/simulate`.
 
 ## Docker
 
@@ -74,7 +74,7 @@ Render hosts the Python API. Replit or Vercel hosts `frontend/`.
 
 ## What is deliberately not here
 
-- SLP, MIMIC-IV, and PIID. See `docs/data_licenses.md`. Position events are labeled `position-v0.0.0-rules` until a model passes the cover and infrared gates.
+- SLP, MIMIC-IV, and PIID. See `docs/data_licenses.md`. Position events are labeled `position-v0.0.0-rules` until a model passes the cover and infrared gates. `ml/somacare_ml` does not replace that label, and there is no `docs/STAGE1_TEST_REPORT.md` until real recordings exist.
 - Any language-model call. Preference drafts are keyword rules and stay unapproved until a nurse accepts them.
 - Video. Frames are dropped in memory. Skin uploads are encrypted under `backend/var/skin/`, which is gitignored, and flagged `shown_to_staff = false`.
 

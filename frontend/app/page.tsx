@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
@@ -72,6 +73,9 @@ export default function LoginPage() {
           </button>
         ))}
       </div>
+      <p className="muted" style={{ marginTop: 22 }}>
+        <Link href="/simulate">See a fictional night</Link>
+      </p>
       {picked && (
         <section className="stack" style={{ marginTop: 18 }}>
           <p className="dots">{pin.replace(/./g, "●") || t("login.pin")}</p>
