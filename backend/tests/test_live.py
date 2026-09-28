@@ -117,12 +117,16 @@ def test_camera_turn_updates_floor_and_log():
 
 # ---------- API ----------
 def test_api_end_to_end():
+    import io
+    from PIL import Image
     from fastapi.testclient import TestClient
     from somacare_live import api
     c = TestClient(api.app)
     assert c.get("/api/health").json()["ok"]
-    r = c.post("/api/residents/2/skin-photo", data={"site": "lhip"}, files={"file": ("a.jpg", b"notreallyajpeg", "image/jpeg")})
-    assert r.json()["suggestion"]["status"] == "model_not_loaded"
+    buf = io.BytesIO(); Image.new("RGB", (400, 400), (200, 160, 140)).save(buf, "JPEG")
+    r = c.post("/api/residents/2/skin-photo", data={"site": "lhip"}, files={"file": ("a.jpg", buf.getvalue(), "image/jpeg")})
+    # no weights -> model_not_loaded; published checkpoint -> a suggestion (plain skin is usually Invalid)
+    assert r.json()["suggestion"]["status"] in ("model_not_loaded", "no_injury", "ok", "unsure")
     r = c.post("/api/residents/2/skin-finding", json={"site": "lhip", "finding": "stage1"})
     assert row(r.json(), 2)["plan"]["interval"] == 0
     r = c.post("/api/residents/2/posture", json={"posture": "supine"})
@@ -171,7 +175,10 @@ def test_calibrate_from_windows(tmp_path):
 def test_photo_folder_becomes_timed_events(tmp_path):
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
     from record_replay import photo_events, record
-    (tmp_path / "room6_rhip_t75_nurse-blanch.jpg").write_bytes(b"x")
+    import io
+    from PIL import Image
+    buf = io.BytesIO(); Image.new("RGB", (400, 400), (200, 160, 140)).save(buf, "JPEG")
+    (tmp_path / "room6_rhip_t75_nurse-blanch.jpg").write_bytes(buf.getvalue())
     (tmp_path / "holiday.jpg").write_bytes(b"x")
     evs = photo_events(tmp_path)
     assert [e["action"] for e in evs] == ["skin_suggestion", "skin_finding"] and evs[1]["t"] == 82
