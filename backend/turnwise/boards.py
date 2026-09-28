@@ -246,6 +246,9 @@ def camera_table(db: Session, now: datetime) -> list[dict]:
                 "cloud": stored.get("cloud"),
                 "simulated": bool(stored.get("simulated", True)),
                 "live": bool(stored.get("live", False)),
+                "origin": stored.get("origin") or "somacare",
+                "consent_state": "signed" if allowed else ("missing" if device.resident_id else "no_resident"),
+                "consent_warning": (stored.get("origin") == "existing") and not allowed,
             }
         )
     rows.sort(key=lambda row: row["room"] or "")
@@ -325,7 +328,7 @@ def director_board(db: Session, now: datetime) -> dict:
         "pressure_injury": {
             "ulcers_prevented": None,
             "ulcers_prevented_note": (
-                "Not estimated. Sorety does not count prevented ulcers. "
+                "Not estimated. SomaCare does not count prevented ulcers. "
                 "There is no incident log in this system, and no model here is validated to predict one."
             ),
             "new_injuries_recorded_this_shift": injuries,

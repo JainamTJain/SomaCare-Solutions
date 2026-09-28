@@ -1,14 +1,14 @@
 # Render Blueprint. Dashboard equivalent:
 # New Web Service, Root Directory = backend, runtime Python,
 # Build: pip install -r requirements.txt
-# Start: uvicorn main:app --host 0.0.0.0 --port $PORT
+# Start: uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1
 services:
   - type: web
     name: turnwise-api
     runtime: python
     rootDir: backend
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1
     envVars:
       - key: PYTHON_VERSION
         value: "3.11"

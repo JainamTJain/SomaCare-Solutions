@@ -73,6 +73,8 @@ class EngineConfig:
     device_offline_s: float = 120
     # Each open task already on this caregiver's shift multiplies visit priority.
     caregiver_load_per_open_task: float = 0.08
+    caregiver_ratio: int = 6
+    care_clock_s: float = 30
     diuretic_window_hours: float = 6
     sedating_window_hours: float = 8
     features: FeatureFlags = field(default_factory=FeatureFlags)

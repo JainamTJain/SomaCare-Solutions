@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import os
 from datetime import datetime, timezone
 
 from turnwise.config import EngineConfig, load_config
+from turnwise.settings import setting
 
 from edge.capture.infrared import frame_is_infrared
 from edge.pipeline.position_rules import MODEL_VERSION, classify_keypoints
@@ -14,7 +14,7 @@ from edge.pipeline.smooth import PositionSmoother
 
 def lab_debug_allowed(consent: bool, config: EngineConfig | None = None) -> bool:
     config = config or load_config()
-    flag = os.environ.get("TURNWISE_LAB_DEBUG", "") == "1" and config.features.lab_debug_frames
+    flag = setting("LAB_DEBUG") == "1" and config.features.lab_debug_frames
     return bool(flag and consent)
 
 

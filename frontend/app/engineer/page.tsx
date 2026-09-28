@@ -167,7 +167,7 @@ export default function EngineerPage() {
 
   return (
     <main className="desk">
-      <p className="kicker">Sorety</p>
+      <p className="kicker">SomaCare</p>
       {who && <FirstRun role="engineer" staffId={who} />}
       <div className="spread">
         <h1>Engineer</h1>

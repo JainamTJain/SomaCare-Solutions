@@ -1,8 +1,10 @@
-# SomaCare Solutions
+# SomaCare
 
-Camera-verified turning and continence rounds. Nurses set every limit. CNAs log nothing for routine care. The care engine is rules and statistical models. It does not call a language model to score, schedule, or alert.
+Camera-verified turning and continence rounds. Nurses set every limit. Caregivers log nothing for routine care. The care engine is rules and statistical models. It does not call a language model to score, schedule, or alert.
 
-The phone app is named Sorety. Each bed uses a cheap infrared baby monitor. One shared computer runs the shoulder-hip rule on those frames and throws the frames away. A side-of-body label under a blanket is not claimed: Gate 1 has not been run (`docs/plan_v3.md`, `docs/gate1_occlusion.md`). The shift can be dropped onto Google Calendar, and the summary shows minutes the CNA did not walk. How that sits on a real hall is in `docs/wiring.md`.
+The product is SomaCare. The Python package is still `turnwise`. Each bed uses a cheap infrared baby monitor. One shared computer runs the shoulder-hip rule on those frames and throws the frames away. A side-of-body label under a blanket is not claimed: Gate 1 has not been run (`docs/plan_v3.md`, `docs/gate1_occlusion.md`). The shift can be dropped onto Google Calendar as `somacare-shift.ics`. The summary shows minutes the caregiver did not walk. That figure is an estimate. How this sits on a real hall is in `docs/wiring.md`.
+
+The API contract is `docs/openapi.json`. Endpoint history is `docs/API_CHANGES.md`. Regenerate the contract with `python scripts/export_openapi.py`. CI fails if the committed file is stale.
 
 ## Run it locally
 
@@ -39,7 +41,9 @@ cd apps/nurse && npm install && npm run dev
 
 Maria is assigned to the hall. Elena Alvarez is already inside her turn window, with a how-to card. Sam has a draft night limit for Mei Lin. Devon is not assigned, so the API refuses him Elena's card. Riley opens the engineer board (live position, area scores, incontinence probability, visual-check uncertainty, and one row per infrared baby monitor). Helen opens the director board (hours saved, and pressure-ulcer prevention left unestimated).
 
-Edge token for `POST /events`: `edge-demo-token` (override with `TURNWISE_EDGE_TOKEN`).
+Edge token for `POST /events`: `edge-demo-token` (override with `SOMACARE_EDGE_TOKEN`. `TURNWISE_EDGE_TOKEN` still works).
+
+`GET /api/config` reads `DEMO_MODE`, `FACILITY_NAME`, and `LOGO_URL` when the process starts a request. Pins appear on the roster only when `DEMO_MODE=true`. The database is `SOMACARE_DATABASE_URL`, then `TURNWISE_DATABASE_URL`, then `DATABASE_URL` (Postgres). If none of those is set, the API uses SQLite. Run one worker. The care clock inside the process recomputes alerts every 30 seconds, including when no page is open. Set `SOMACARE_CARE_CLOCK=0` to leave it off.
 
 A scripted posture sequence, with no camera and no frames written:
 
@@ -63,10 +67,10 @@ The continence test refits a small hazard model and takes a few seconds. The 14-
 
 Render hosts the Python API. Replit or Vercel hosts `frontend/`.
 
-1. On Render, New → Web Service, connect this repo. Root Directory: `backend`. Build command: `pip install -r requirements.txt`. Start command: `uvicorn main:app --host 0.0.0.0 --port $PORT`. `render.yaml` records the same settings. Set `TURNWISE_SECRET`, `TURNWISE_EDGE_TOKEN`, and `TURNWISE_CORS_ORIGINS` to the live front-end origin (comma-separated if you have more than one).
+1. On Render, New → Web Service, connect this repo. Root Directory: `backend`. Build command: `pip install -r requirements.txt`. Start command: `uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1`. `render.yaml` records the same settings. Set `SOMACARE_SECRET`, `SOMACARE_EDGE_TOKEN`, and `SOMACARE_CORS_ORIGINS` to the live front-end origin (comma-separated if you have more than one). The older `TURNWISE_*` names still work. Set `DATABASE_URL` when the database is Postgres.
 2. Copy the service URL Render prints.
 3. In Replit or Vercel, set `NEXT_PUBLIC_API_URL` to that URL and rebuild `frontend/`. Until you do, production builds call the placeholder `https://onrender.com` in `frontend/config.js`. Local `npm run dev` keeps using `http://127.0.0.1:8000`.
-4. The API allows `http://localhost:3000`, `http://127.0.0.1:3000`, the nurse app on port 3001, `https://vercel.app`, and `https://*.vercel.app` / Replit hosts. Add any other origin with `TURNWISE_CORS_ORIGINS`.
+4. The API allows `http://localhost:3000`, `http://127.0.0.1:3000`, the nurse app on port 3001, `https://vercel.app`, and `https://*.vercel.app` / Replit hosts. Add any other origin with `SOMACARE_CORS_ORIGINS`.
 
 ## What is deliberately not here
 

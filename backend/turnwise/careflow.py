@@ -37,6 +37,7 @@ from turnwise.engine.budget import turn_due
 from turnwise.engine.continence import FEATURE_NAMES, continence_features, cumulative_wet, schedule_from_hazard
 from turnwise.engine.risk_rules import ResidentRisk, dose_in_window, extra_risk_steps
 from turnwise.engine.scheduler import SchedTask, can_verify_check, merge_tasks, risk_weight, with_caregiver_load
+from turnwise.schedule import blackout_task_ids, ensure_fixed_tasks
 from turnwise.models import (
     Alert,
     Assignment,
@@ -45,6 +46,7 @@ from turnwise.models import (
     ContinenceObs,
     Device,
     Event,
+    MealLog,
     MedicationLog,
     MorningVital,
     Override,
@@ -904,6 +906,7 @@ def build_shift(db: Session, staff: Staff, now: datetime) -> dict:
                     "learning": config.learning_period,
                 }
             )
+        ensure_fixed_tasks(db, resident.id, now, config)
         open_tasks = (
             db.query(Task)
             .filter(Task.resident_id == resident.id, Task.status == "open")
@@ -959,6 +962,9 @@ def build_shift(db: Session, staff: Staff, now: datetime) -> dict:
             "monitoring": monitoring_state(db, resident.id),
         }
 
+    hidden = blackout_task_ids(db, tasks, now, config)
+    if hidden:
+        tasks = [task for task in tasks if task.id not in hidden]
     visits = merge_tasks(tasks, config.merge_window_min)
     for task in tasks:
         if task.merged_into:
@@ -1229,6 +1235,22 @@ def full_picture(db: Session, resident_id: str, now: datetime) -> dict:
         }
         for row in vitals
     ]
+    meals = (
+        db.query(MealLog)
+        .filter(MealLog.resident_id == resident_id)
+        .order_by(MealLog.ts.desc())
+        .limit(20)
+        .all()
+    )
+    meal_rows = [
+        {
+            "ts": _aware(row.ts).isoformat(),
+            "meal_type": row.meal_type,
+            "items_text": row.items_text,
+            "percent_eaten": row.percent_eaten,
+        }
+        for row in meals
+    ]
     items = []
     for row in event_rows:
         items.append({"ts": row["ts"], "kind": row["kind"], "source": "event"})
@@ -1238,6 +1260,10 @@ def full_picture(db: Session, resident_id: str, now: datetime) -> dict:
         items.append({"ts": row["ts"], "kind": "skin_capture", "source": "skin", "area": row["area"]})
     for row in vital_rows:
         items.append({"ts": row["ts"], "kind": "vitals", "source": "vitals"})
+    for row in dose_rows:
+        items.append({"ts": row["ts"], "kind": "medication", "source": "medication", "name": row["medication_name"]})
+    for row in meal_rows:
+        items.append({"ts": row["ts"], "kind": "meal", "source": "meals", "meal_type": row["meal_type"]})
     items.sort(key=lambda row: row["ts"], reverse=True)
     feature_block = (
         {
@@ -1270,6 +1296,8 @@ def full_picture(db: Session, resident_id: str, now: datetime) -> dict:
                 "continence": obs_source,
                 "skin_captures": skin_source,
                 "vitals": _source(vital_rows),
+                "medications": _source(dose_rows),
+                "meals": _source(meal_rows),
             },
             "items": items[:40],
         },

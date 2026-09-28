@@ -1,6 +1,6 @@
 import "./globals.css";
 
-export const metadata = { title: "Sorety nurse" };
+export const metadata = { title: "SomaCare nurse" };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (

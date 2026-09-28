@@ -4,14 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, WebSocket, WebSocketDisconnect
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from turnwise.auth import Principal, get_db, get_principal, issue_token, require_roles, verify_pin
+from turnwise.auth import SESSION_COOKIE, TOKEN_MAX_AGE_S, Principal, get_db, get_principal, issue_token, require_roles, verify_pin
 from turnwise.boards import director_board, engineer_board
 from turnwise.daybook import shift_ics
 from turnwise.careflow import (
@@ -19,6 +20,7 @@ from turnwise.careflow import (
     approve_plan,
     build_shift,
     continence_view,
+    current_shift,
     full_picture,
     history,
     record_override,
@@ -26,18 +28,26 @@ from turnwise.careflow import (
     staff_can_see,
     utcnow,
 )
+from turnwise.clock import status as clock_status
 from turnwise.config import load_config
 from turnwise.consent import has_signed, request_consent, revoke_consent, send_consent, sign_consent, simple_pdf
 from turnwise.engine.preferences import extract_with_fallback
 from turnwise.ingest import export_care, import_records
+from turnwise.live import format_sse, snapshot
+from turnwise.settings import DEMO_PINS, demo_mode, public_config
 from turnwise.models import (
     Alert,
+    Assignment,
     AuditLog,
     HelpRequest,
     HandoffNote,
     ConsentRecord,
     Device,
     Facility,
+    Lead,
+    MealLog,
+    ScheduleTemplate,
+    StaffTour,
     Plan,
     Preference,
     Resident,
@@ -153,7 +163,7 @@ def _guard_resident(db: Session, principal: Principal, resident_id: str) -> Resi
 @router.get("/health")
 def health():
     config = load_config()
-    return {
+    body = {
         "ok": True,
         "pilot_mode": config.pilot_mode,
         "llm_preference_extract": config.features.llm_preference_extract,
@@ -161,26 +171,35 @@ def health():
         "gate1": "not_run",
         "resident_data": "demo_only",
     }
+    body.update(clock_status())
+    return body
+
+
+@router.get("/config")
+def runtime_config():
+    return public_config()
 
 
 @router.get("/auth/roster")
 def roster(db: Session = Depends(get_db)):
     people = db.query(Staff).order_by(Staff.display_name).all()
-    return {
-        "staff": [
-            {
-                "id": person.id,
-                "display_name": person.display_name,
-                "role": person.role,
-                "ui_language": person.ui_language,
-            }
-            for person in people
-        ]
-    }
+    show_pins = demo_mode()
+    rows = []
+    for person in people:
+        row = {
+            "id": person.id,
+            "display_name": person.display_name,
+            "role": person.role,
+            "ui_language": person.ui_language,
+        }
+        if show_pins and person.display_name in DEMO_PINS:
+            row["pin"] = DEMO_PINS[person.display_name]
+        rows.append(row)
+    return {"staff": rows}
 
 
 @router.post("/auth/login")
-def login(body: LoginIn, db: Session = Depends(get_db)):
+def login(body: LoginIn, response: Response, db: Session = Depends(get_db)):
     person = db.get(Staff, body.staff_id)
     credential = db.get(StaffCredential, body.staff_id) if person else None
     now = datetime.now(timezone.utc)
@@ -188,16 +207,25 @@ def login(body: LoginIn, db: Session = Depends(get_db)):
     if locked is not None and locked.tzinfo is None:
         locked = locked.replace(tzinfo=timezone.utc)
     if locked is not None and locked > now:
-        raise HTTPException(status_code=429, detail="PIN locked. Try again in fifteen minutes.")
+        raise HTTPException(
+            status_code=429,
+            detail="Too many tries. Please wait a few minutes and try again.",
+        )
     if person is None or credential is None or not verify_pin(body.pin, credential):
         if credential is not None:
             credential.failed_attempts = int(credential.failed_attempts or 0) + 1
             if credential.failed_attempts >= 5:
                 credential.locked_until = now + timedelta(minutes=15)
                 db.commit()
-                raise HTTPException(status_code=429, detail="PIN locked. Try again in fifteen minutes.")
+                raise HTTPException(
+                    status_code=429,
+                    detail="Too many tries. Please wait a few minutes and try again.",
+                )
             db.commit()
-        raise HTTPException(status_code=401, detail="name or PIN does not match")
+        raise HTTPException(
+            status_code=401,
+            detail="That PIN does not match. Try again, or ask your director to reset it.",
+        )
     credential.failed_attempts = 0
     credential.locked_until = None
     db.add(
@@ -210,8 +238,17 @@ def login(body: LoginIn, db: Session = Depends(get_db)):
         )
     )
     db.commit()
+    token = issue_token(person)
+    response.set_cookie(
+        SESSION_COOKIE,
+        token,
+        max_age=TOKEN_MAX_AGE_S,
+        httponly=True,
+        samesite="lax",
+        path="/",
+    )
     return {
-        "token": issue_token(person),
+        "token": token,
         "staff": {
             "id": person.id,
             "display_name": person.display_name,
@@ -490,7 +527,7 @@ def my_shift_calendar(
     return Response(
         content=payload,
         media_type="text/calendar",
-        headers={"Content-Disposition": 'attachment; filename="sorety-shift.ics"'},
+        headers={"Content-Disposition": 'attachment; filename="somacare-shift.ics"'},
     )
 
 
@@ -1063,3 +1100,299 @@ class Hub:
 
 
 hub = Hub()
+
+
+class LeadIn(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    email: str = Field(min_length=3, max_length=200)
+    organization: str | None = None
+    kind: str
+    message: str | None = None
+
+
+class TourIn(BaseModel):
+    tour: str = Field(min_length=1, max_length=40)
+
+
+class WindowIn(BaseModel):
+    kind: str
+    label: str = Field(min_length=1, max_length=80)
+    start: str
+    end: str
+
+
+class ScheduleIn(BaseModel):
+    resident_id: str
+    reason: str = Field(min_length=3)
+    windows: list[WindowIn]
+
+
+class ReasonIn(BaseModel):
+    reason: str = Field(min_length=3)
+
+
+class MealIn(BaseModel):
+    meal_type: str
+    items_text: str | None = None
+    percent_eaten: int | None = None
+    fluid_intake_ml: int | None = None
+
+
+_HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+_TOUR = re.compile(r"^[a-z0-9_]{1,40}$")
+_LEAD_KINDS = {"pilot", "investor", "partner", "other"}
+_MEALS = {"breakfast", "lunch", "dinner", "snack"}
+
+
+def _window_row(window: WindowIn) -> dict:
+    if window.kind not in {"fixed", "blackout"}:
+        raise HTTPException(status_code=400, detail="window kind must be fixed or blackout")
+    if not _HHMM.match(window.start) or not _HHMM.match(window.end):
+        raise HTTPException(status_code=400, detail="window times use HH:MM")
+    return {"kind": window.kind, "label": window.label, "start": window.start, "end": window.end}
+
+
+def _schedule_row(row: ScheduleTemplate) -> dict:
+    return {
+        "id": row.id,
+        "resident_id": row.resident_id,
+        "version": row.version,
+        "status": row.status,
+        "reason": row.reason,
+        "windows": row.windows or [],
+        "approved_at": row.approved_at.isoformat() if row.approved_at else None,
+    }
+
+
+@router.get("/stream")
+async def unit_events(once: bool = False, principal: Principal = Depends(get_principal)):
+    """Push resident status and alert changes for the caller's role.
+
+    `once` returns a single event and closes. The live client omits it and
+    keeps the connection open.
+    """
+    staff_id, role = principal.id, principal.role
+
+    async def _events():
+        from turnwise.db import SessionLocal
+
+        previous = None
+        while True:
+            db = SessionLocal()
+            try:
+                payload = snapshot(db, staff_id, role)
+            finally:
+                db.close()
+            encoded = format_sse(payload)
+            if encoded != previous:
+                yield encoded
+                previous = encoded
+            else:
+                yield ": keepalive\n\n"
+            if once:
+                return
+            await asyncio.sleep(2)
+
+    return StreamingResponse(_events(), media_type="text/event-stream")
+
+
+@router.post("/leads")
+def create_lead(body: LeadIn, db: Session = Depends(get_db)):
+    if body.kind not in _LEAD_KINDS:
+        raise HTTPException(status_code=400, detail="kind must be pilot, investor, partner, or other")
+    if "@" not in body.email:
+        raise HTTPException(status_code=400, detail="email needs an @")
+    row = Lead(
+        name=body.name.strip(),
+        email=body.email.strip(),
+        organization=(body.organization or "").strip() or None,
+        kind=body.kind,
+        message=(body.message or "").strip() or None,
+    )
+    db.add(row)
+    db.commit()
+    return {"id": row.id, "created_at": row.created_at.isoformat()}
+
+
+@router.get("/leads")
+def list_leads(
+    principal: Principal = Depends(require_roles("director", "admin")),
+    db: Session = Depends(get_db),
+):
+    rows = db.query(Lead).order_by(Lead.created_at.desc()).all()
+    return {
+        "leads": [
+            {
+                "id": row.id,
+                "name": row.name,
+                "email": row.email,
+                "organization": row.organization,
+                "kind": row.kind,
+                "message": row.message,
+                "created_at": row.created_at.isoformat(),
+            }
+            for row in rows
+        ]
+    }
+
+
+@router.get("/me/tours")
+def my_tours(principal: Principal = Depends(get_principal), db: Session = Depends(get_db)):
+    rows = db.query(StaffTour).filter(StaffTour.staff_id == principal.id).order_by(StaffTour.tour_key).all()
+    return {"tours": [{"tour": row.tour_key, "seen_at": row.seen_at.isoformat()} for row in rows]}
+
+
+@router.post("/me/tours")
+def mark_tour(body: TourIn, principal: Principal = Depends(get_principal), db: Session = Depends(get_db)):
+    if not _TOUR.match(body.tour):
+        raise HTTPException(status_code=400, detail="tour key must be short lowercase words")
+    existing = (
+        db.query(StaffTour)
+        .filter(StaffTour.staff_id == principal.id, StaffTour.tour_key == body.tour)
+        .first()
+    )
+    if existing is None:
+        existing = StaffTour(staff_id=principal.id, tour_key=body.tour)
+        db.add(existing)
+        db.commit()
+    return {"tour": existing.tour_key, "seen_at": existing.seen_at.isoformat()}
+
+
+@router.get("/nurse/schedules/{resident_id}")
+def resident_schedule(
+    resident_id: str,
+    principal: Principal = Depends(require_roles("nurse", "charge_nurse", "admin")),
+    db: Session = Depends(get_db),
+):
+    if db.get(Resident, resident_id) is None:
+        raise HTTPException(status_code=404, detail="resident not found")
+    rows = (
+        db.query(ScheduleTemplate)
+        .filter(ScheduleTemplate.resident_id == resident_id)
+        .order_by(ScheduleTemplate.version.desc())
+        .all()
+    )
+    return {"versions": [_schedule_row(row) for row in rows]}
+
+
+@router.post("/nurse/schedules")
+def draft_schedule(
+    body: ScheduleIn,
+    principal: Principal = Depends(require_roles("nurse", "charge_nurse", "admin")),
+    db: Session = Depends(get_db),
+):
+    if db.get(Resident, body.resident_id) is None:
+        raise HTTPException(status_code=404, detail="resident not found")
+    latest = (
+        db.query(ScheduleTemplate)
+        .filter(ScheduleTemplate.resident_id == body.resident_id)
+        .order_by(ScheduleTemplate.version.desc())
+        .first()
+    )
+    row = ScheduleTemplate(
+        resident_id=body.resident_id,
+        version=(latest.version + 1) if latest else 1,
+        status="draft",
+        reason=body.reason.strip(),
+        windows=[_window_row(window) for window in body.windows],
+    )
+    db.add(row)
+    db.add(
+        AuditLog(
+            staff_id=principal.id,
+            action="schedule.draft",
+            target_type="schedule_template",
+            target_id=row.id,
+            detail={"version": row.version, "resident_id": body.resident_id},
+        )
+    )
+    db.commit()
+    return _schedule_row(row)
+
+
+@router.post("/nurse/schedules/{template_id}/approve")
+def approve_schedule(
+    template_id: str,
+    body: ReasonIn,
+    principal: Principal = Depends(require_roles("nurse", "charge_nurse", "admin")),
+    db: Session = Depends(get_db),
+):
+    row = db.get(ScheduleTemplate, template_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="schedule not found")
+    if row.status == "approved":
+        return _schedule_row(row)
+    row.status = "approved"
+    row.reason = body.reason.strip()
+    row.approved_by = principal.id
+    row.approved_at = datetime.now(timezone.utc)
+    db.add(
+        AuditLog(
+            staff_id=principal.id,
+            action="schedule.approve",
+            target_type="schedule_template",
+            target_id=row.id,
+            detail={"version": row.version},
+        )
+    )
+    db.commit()
+    return _schedule_row(row)
+
+
+@router.get("/director/load")
+def director_load(
+    principal: Principal = Depends(require_roles("director", "admin")),
+    db: Session = Depends(get_db),
+):
+    config = load_config()
+    shift = current_shift(db, utcnow())
+    counts: dict[str, int] = {}
+    if shift is not None:
+        for row in db.query(Assignment).filter(Assignment.shift_id == shift.id).all():
+            counts[row.staff_id] = counts.get(row.staff_id, 0) + 1
+    people = []
+    for staff_id, count in sorted(counts.items(), key=lambda item: item[1], reverse=True):
+        person = db.get(Staff, staff_id)
+        people.append(
+            {
+                "staff_id": staff_id,
+                "display_name": person.display_name if person else None,
+                "residents": count,
+                "over": count > config.caregiver_ratio,
+            }
+        )
+    return {"ratio": config.caregiver_ratio, "shift_id": shift.id if shift else None, "caregivers": people}
+
+
+@router.get("/residents/{resident_id}/timeline")
+def resident_timeline(
+    resident_id: str,
+    principal: Principal = Depends(get_principal),
+    db: Session = Depends(get_db),
+):
+    resident = _guard_resident(db, principal, resident_id)
+    picture = full_picture(db, resident.id, utcnow())
+    return {"resident_id": resident.id, "name": picture["name"], "timeline": picture["timeline"]}
+
+
+@router.post("/residents/{resident_id}/meals")
+def log_meal(
+    resident_id: str,
+    body: MealIn,
+    principal: Principal = Depends(require_roles("nurse", "charge_nurse", "cna", "admin")),
+    db: Session = Depends(get_db),
+):
+    resident = _guard_resident(db, principal, resident_id)
+    if body.meal_type not in _MEALS:
+        raise HTTPException(status_code=400, detail="meal_type must be breakfast, lunch, dinner, or snack")
+    row = MealLog(
+        resident_id=resident.id,
+        meal_type=body.meal_type,
+        items_text=body.items_text,
+        percent_eaten=body.percent_eaten,
+        fluid_intake_ml=body.fluid_intake_ml,
+        entered_by=principal.id,
+    )
+    db.add(row)
+    db.commit()
+    return {"id": row.id, "meal_type": row.meal_type}

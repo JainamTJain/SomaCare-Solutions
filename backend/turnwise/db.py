@@ -9,12 +9,24 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from turnwise.paths import data_dir
+from turnwise.settings import setting
 
 DEFAULT_SQLITE = data_dir() / "turnwise.db"
 
 
 def database_url() -> str:
-    return os.environ.get("TURNWISE_DATABASE_URL", f"sqlite:///{DEFAULT_SQLITE}")
+    """SOMACARE_DATABASE_URL, then TURNWISE_DATABASE_URL, then DATABASE_URL.
+
+    Tests set TURNWISE_DATABASE_URL, so an ambient DATABASE_URL does not
+    point them at Postgres. A deployment that only has DATABASE_URL uses it.
+    """
+    explicit = setting("DATABASE_URL")
+    if explicit:
+        return explicit
+    shared = os.environ.get("DATABASE_URL")
+    if shared:
+        return shared
+    return f"sqlite:///{DEFAULT_SQLITE}"
 
 
 def _engine(url: str):

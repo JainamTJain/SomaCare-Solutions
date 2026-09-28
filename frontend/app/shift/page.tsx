@@ -134,7 +134,7 @@ async function downloadShift() {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = "sorety-shift.ics";
+  link.download = "somacare-shift.ics";
   link.click();
   URL.revokeObjectURL(url);
 }

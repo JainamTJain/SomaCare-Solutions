@@ -223,10 +223,10 @@ def shift_ics(items: list[dict], staff_name: str) -> str:
     lines = [
         "BEGIN:VCALENDAR",
         "VERSION:2.0",
-        "PRODID:-//Sorety//Shift//EN",
+        "PRODID:-//SomaCare//Shift//EN",
         "CALSCALE:GREGORIAN",
         "METHOD:PUBLISH",
-        f"X-WR-CALNAME:Sorety · {esc(staff_name)}",
+        f"X-WR-CALNAME:SomaCare · {esc(staff_name)}",
     ]
     for item in items:
         if item.get("settled"):
@@ -246,7 +246,7 @@ def shift_ics(items: list[dict], staff_name: str) -> str:
         lines.extend(
             [
                 "BEGIN:VEVENT",
-                f"UID:{uid}@sorety",
+                f"UID:{uid}@somacare",
                 f"DTSTAMP:{stamp(datetime.now(timezone.utc))}",
                 f"DTSTART:{stamp(start)}",
                 f"DTEND:{stamp(end)}",

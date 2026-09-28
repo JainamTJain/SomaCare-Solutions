@@ -7,7 +7,6 @@ No frame is written unencrypted. Nothing here is a diagnosis.
 
 from __future__ import annotations
 
-import os
 import uuid
 
 import cv2
@@ -17,12 +16,13 @@ from cryptography.fernet import Fernet
 from turnwise.config import load_config
 from turnwise.imaging import quality
 from turnwise.paths import data_dir
+from turnwise.settings import setting
 
 STORE = data_dir() / "skin"
 
 
 def _fernet() -> Fernet:
-    key = os.environ.get("TURNWISE_SKIN_KEY")
+    key = setting("SKIN_KEY")
     if not key:
         # Dev-only key file, created locally and gitignored via var/.
         path = data_dir() / "skin.key"

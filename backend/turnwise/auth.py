@@ -4,22 +4,23 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import os
 import secrets
 from dataclasses import dataclass
 
-from fastapi import Depends, Header, HTTPException
+from fastapi import Depends, Header, HTTPException, Request
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from sqlalchemy.orm import Session
 
 from turnwise.db import get_session
 from turnwise.models import Staff, StaffCredential
+from turnwise.settings import setting
 
 TOKEN_MAX_AGE_S = 12 * 60 * 60
+SESSION_COOKIE = "somacare_session"
 
 
 def _secret() -> str:
-    return os.environ.get("TURNWISE_SECRET", "turnwise-dev-secret-change-me")
+    return setting("SECRET", "turnwise-dev-secret-change-me") or "turnwise-dev-secret-change-me"
 
 
 def _serializer() -> URLSafeTimedSerializer:
@@ -27,7 +28,7 @@ def _serializer() -> URLSafeTimedSerializer:
 
 
 def edge_token() -> str:
-    return os.environ.get("TURNWISE_EDGE_TOKEN", "edge-demo-token")
+    return setting("EDGE_TOKEN", "edge-demo-token") or "edge-demo-token"
 
 
 def hash_pin(pin: str, salt: str | None = None) -> tuple[str, str]:
@@ -58,13 +59,21 @@ def get_db(db: Session = Depends(get_session)) -> Session:
     return db
 
 
+def _token_from_request(request: Request, authorization: str | None) -> str | None:
+    if authorization and authorization.lower().startswith("bearer "):
+        return authorization.split(" ", 1)[1].strip()
+    cookie = request.cookies.get(SESSION_COOKIE) or request.cookies.get("turnwise_session")
+    return cookie or None
+
+
 def get_principal(
+    request: Request,
     authorization: str | None = Header(default=None),
     db: Session = Depends(get_session),
 ) -> Principal:
-    if not authorization or not authorization.lower().startswith("bearer "):
+    token = _token_from_request(request, authorization)
+    if not token:
         raise HTTPException(status_code=401, detail="missing bearer token")
-    token = authorization.split(" ", 1)[1].strip()
     if hmac.compare_digest(token, edge_token()):
         return Principal(id="edge", role="edge", display_name="Edge", ui_language="en", is_edge=True)
     try:

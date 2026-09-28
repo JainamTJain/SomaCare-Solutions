@@ -480,6 +480,7 @@ def seed_if_empty(db: Session) -> None:
                     "cloud": "off",
                     "simulated": True,
                     "live": False,
+                    "origin": "somacare",
                     "rtsp": f"rtsp://192.168.1.{20 + index}/stream1",
                 },
             )
