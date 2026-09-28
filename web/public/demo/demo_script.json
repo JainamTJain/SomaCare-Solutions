@@ -1,0 +1,7 @@
+[
+ {"t": 40,  "rid": 2, "action": "wet", "source": "thermal sensor"},
+ {"t": 75,  "rid": 6, "action": "skin_suggestion", "site": "rhip", "finding": "stage1", "message": "bath photo: looks like Stage 1 (demo)"},
+ {"t": 82,  "rid": 6, "action": "skin_finding", "site": "rhip", "finding": "blanch", "nurse": "Nurse Helen"},
+ {"t": 120, "rid": 3, "action": "inputs", "patch": {"braden": {"nutrition": 2}}},
+ {"t": 150, "rid": 1, "action": "wet", "source": "thermal sensor"}
+]

@@ -38,3 +38,6 @@ demo_media/video/raw/
 *.mp4
 !demo_media/video/bed1.mp4
 !web/public/demo/bed1-demo.mp4
+demo_media/site_photos/*
+!demo_media/site_photos/README.md
+!demo_media/site_photos/credits.csv

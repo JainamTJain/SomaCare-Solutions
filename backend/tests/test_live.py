@@ -202,3 +202,21 @@ def test_published_model_output_maps_to_engine_findings():
     f.skin_suggestion(2, "lhip", skin.interpret(P(0, 0.9)), auto_apply=True)
     assert row(f.snapshot(), 2)["plan"]["interval"] == iv and not row(f.snapshot(), 2)["skin_provisional"]
 
+def test_score_site_photos(tmp_path, monkeypatch):
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
+    import score_site_photos as ssp
+    from PIL import Image
+    src = tmp_path / "src"; src.mkdir()
+    img = Image.new("RGB", (3000, 2000), (190, 120, 110)); exif = img.getexif(); exif[0x010F] = "PhoneMaker"
+    img.save(src / "Sacrum Photo 1.JPG", exif=exif); Image.new("RGB", (500, 500)).save(src / "heel.png")
+    (src / "credits.csv").write_text("file,credit,licence,source_url\nheel.png,Team photo,CC BY 4.0,\n")
+    try: ssp.score(src, tmp_path / "out"); assert False, "must refuse without the real model"
+    except SystemExit: pass
+    probs = [0.05, 0.05, 0.7, 0.05, 0.05, 0.05, 0.05]
+    monkeypatch.setattr(ssp.skin, "suggest", lambda b: ssp.skin.interpret(probs))
+    m = ssp.score(src, tmp_path / "out")
+    assert [p["file"] for p in m["photos"]] == ["heel.jpg", "sacrum-photo-1.jpg"]
+    assert m["photos"][1]["finding"] == "stage1" and m["photos"][0]["licence"] == "CC BY 4.0"
+    out = Image.open(tmp_path / "out" / "sacrum-photo-1.jpg")
+    assert max(out.size) == 1024 and not dict(out.getexif())       # resized, metadata stripped
+
