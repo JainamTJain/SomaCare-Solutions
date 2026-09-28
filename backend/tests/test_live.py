@@ -182,3 +182,16 @@ def test_photo_folder_becomes_timed_events(tmp_path):
     assert res["photos"][0]["file"] == "room6_rhip_t75_nurse-blanch.jpg"
     evtext = [e["text"] for s in res["snapshots"] for e in s["new_events"] if e["room"] == "Room 6"]
     assert any("bath photo" in t for t in evtext) and any("confirmed right hip" in t for t in evtext)
+
+def test_published_model_output_maps_to_engine_findings():
+    from somacare_live import skin
+    P = lambda i, c: [c if j == i else (1 - c) / 6 for j in range(7)]
+    assert skin.interpret(P(0, 0.9))["finding"] == "intact" and skin.interpret(P(0, 0.9))["status"] == "no_injury"
+    assert skin.interpret(P(2, 0.8))["finding"] == "stage1"
+    assert all(skin.interpret(P(i, 0.8))["finding"] == "stage2" for i in (1, 3, 4, 5, 6))
+    u = skin.interpret(P(3, 0.4)); assert u["status"] == "unsure" and u["finding"] is None
+    f = floor_at(0)
+    iv = row(f.snapshot(), 2)["plan"]["interval"]
+    f.skin_suggestion(2, "lhip", skin.interpret(P(0, 0.9)), auto_apply=True)
+    assert row(f.snapshot(), 2)["plan"]["interval"] == iv and not row(f.snapshot(), 2)["skin_provisional"]
+

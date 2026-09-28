@@ -29,6 +29,7 @@ backend/models/
 backend/data/
 backend/clips/
 *.pt
+*.pth
 *.task
 *.mov
 *.MOV
