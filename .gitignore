@@ -18,5 +18,7 @@ dist/
 .coverage
 htmlcov/
 ml/reports/generated/
+ml/somacare_ml/data/
+ml/somacare_ml/models/
 *.onnx
 !edge/models/.gitkeep

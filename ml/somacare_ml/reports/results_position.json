@@ -1,0 +1,77 @@
+{
+ "classes": [
+  "back",
+  "left",
+  "out_of_bed",
+  "right",
+  "sitting"
+ ],
+ "people_held_out": 8,
+ "temperature": 1.7415720439634101,
+ "ece": 0.0722074515386845,
+ "overall": {
+  "n": 2400,
+  "accuracy_all": 0.29833333333333334,
+  "accuracy_when_claimed": 0.9445910290237467,
+  "unknown_rate": 0.6841666666666666
+ },
+ "by_cover": {
+  "none": {
+   "n": 800,
+   "accuracy_all": 0.4575,
+   "accuracy_when_claimed": 0.9838709677419355,
+   "unknown_rate": 0.5349999999999999
+  },
+  "sheet": {
+   "n": 800,
+   "accuracy_all": 0.37875,
+   "accuracy_when_claimed": 0.964968152866242,
+   "unknown_rate": 0.6074999999999999
+  },
+  "blanket": {
+   "n": 800,
+   "accuracy_all": 0.05875,
+   "accuracy_when_claimed": 0.6527777777777778,
+   "unknown_rate": 0.91
+  }
+ },
+ "left_right_confusion": 0.04479166666666667,
+ "confusion_matrix": [
+  [
+   280,
+   14,
+   157,
+   7,
+   22
+  ],
+  [
+   14,
+   276,
+   158,
+   15,
+   17
+  ],
+  [
+   8,
+   19,
+   423,
+   12,
+   18
+  ],
+  [
+   10,
+   28,
+   151,
+   276,
+   15
+  ],
+  [
+   30,
+   22,
+   157,
+   15,
+   256
+  ]
+ ],
+ "min_conf": 0.7
+}

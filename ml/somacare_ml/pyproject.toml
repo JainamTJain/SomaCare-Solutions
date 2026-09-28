@@ -1,0 +1,16 @@
+[project]
+name = "somacare-ml"
+version = "0.1.0"
+description = "SomaCare predictive analysis: position, turns, continence, safety simulation, patterns"
+requires-python = ">=3.10"
+dependencies = ["numpy", "scipy", "scikit-learn", "opencv-python-headless", "joblib", "pandas"]
+
+[project.optional-dependencies]
+keypoints = ["mediapipe"]
+test = ["pytest"]
+
+[tool.setuptools.packages.find]
+include = ["somacare_ml*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

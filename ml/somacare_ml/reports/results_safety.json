@@ -1,0 +1,155 @@
+{
+ "scenarios": [
+  {
+   "scenario": "paper: scheduled visits only, no camera",
+   "failure_episodes": 16,
+   "residents_with_a_failure": 13,
+   "failures_per_resident_day": 0.0476,
+   "max_true_exposure_min": 159.0,
+   "alerts": 0,
+   "human_visits": 3943,
+   "false_confirms": 0
+  },
+  {
+   "scenario": "camera, perfect model",
+   "failure_episodes": 20,
+   "residents_with_a_failure": 16,
+   "failures_per_resident_day": 0.0595,
+   "max_true_exposure_min": 177.0,
+   "alerts": 3417,
+   "human_visits": 3284,
+   "false_confirms": 0
+  },
+  {
+   "scenario": "camera, misses 30% of self-repositions",
+   "failure_episodes": 22,
+   "residents_with_a_failure": 16,
+   "failures_per_resident_day": 0.0655,
+   "max_true_exposure_min": 185.0,
+   "alerts": 3615,
+   "human_visits": 3516,
+   "false_confirms": 0
+  },
+  {
+   "scenario": "camera, 1 false confirm per 10 h, no cap",
+   "failure_episodes": 360,
+   "residents_with_a_failure": 24,
+   "failures_per_resident_day": 1.0714,
+   "max_true_exposure_min": 354.0,
+   "alerts": 3099,
+   "human_visits": 2932,
+   "false_confirms": 838
+  },
+  {
+   "scenario": "camera, 1 false confirm per 10 h, cap 240 min",
+   "failure_episodes": 300,
+   "residents_with_a_failure": 24,
+   "failures_per_resident_day": 0.8929,
+   "max_true_exposure_min": 239.0,
+   "alerts": 2946,
+   "human_visits": 3212,
+   "false_confirms": 849
+  },
+  {
+   "scenario": "camera, 1 false confirm per 10 h, cap = limit + tolerance",
+   "failure_episodes": 0,
+   "residents_with_a_failure": 0,
+   "failures_per_resident_day": 0.0,
+   "max_true_exposure_min": 149.0,
+   "alerts": 2494,
+   "human_visits": 3805,
+   "false_confirms": 815
+  }
+ ],
+ "sweep": {
+  "paper_failures_per_resident_day": 0.0476,
+  "paper_visits_per_resident_day": 11.74,
+  "rows": [
+   {
+    "false_confirms_per_hour": 0.0,
+    "no_cap": 0.0595,
+    "no_cap_visits_per_resident_day": 9.77,
+    "cap_240": 0.0387,
+    "cap_240_visits_per_resident_day": 10.21,
+    "cap_limit_plus_tolerance": 0.0,
+    "cap_limit_plus_tolerance_visits_per_resident_day": 11.63
+   },
+   {
+    "false_confirms_per_hour": 0.01,
+    "no_cap": 0.1875,
+    "no_cap_visits_per_resident_day": 9.64,
+    "cap_240": 0.1369,
+    "cap_240_visits_per_resident_day": 10.13,
+    "cap_limit_plus_tolerance": 0.0,
+    "cap_limit_plus_tolerance_visits_per_resident_day": 11.6
+   },
+   {
+    "false_confirms_per_hour": 0.02,
+    "no_cap": 0.2917,
+    "no_cap_visits_per_resident_day": 9.52,
+    "cap_240": 0.2202,
+    "cap_240_visits_per_resident_day": 10.07,
+    "cap_limit_plus_tolerance": 0.0,
+    "cap_limit_plus_tolerance_visits_per_resident_day": 11.57
+   },
+   {
+    "false_confirms_per_hour": 0.05,
+    "no_cap": 0.6071,
+    "no_cap_visits_per_resident_day": 9.21,
+    "cap_240": 0.5327,
+    "cap_240_visits_per_resident_day": 9.83,
+    "cap_limit_plus_tolerance": 0.0,
+    "cap_limit_plus_tolerance_visits_per_resident_day": 11.46
+   },
+   {
+    "false_confirms_per_hour": 0.1,
+    "no_cap": 1.0714,
+    "no_cap_visits_per_resident_day": 8.73,
+    "cap_240": 0.8929,
+    "cap_240_visits_per_resident_day": 9.56,
+    "cap_limit_plus_tolerance": 0.0,
+    "cap_limit_plus_tolerance_visits_per_resident_day": 11.32
+   },
+   {
+    "false_confirms_per_hour": 0.2,
+    "no_cap": 1.8452,
+    "no_cap_visits_per_resident_day": 7.82,
+    "cap_240": 1.5506,
+    "cap_240_visits_per_resident_day": 9.0,
+    "cap_limit_plus_tolerance": 0.0,
+    "cap_limit_plus_tolerance_visits_per_resident_day": 11.15
+   }
+  ]
+ },
+ "fine_sweep": {
+  "paper_failures_per_resident_day": 0.0952,
+  "paper_visits_per_resident_day": 11.76,
+  "rows": [
+   {
+    "rate": 0.0,
+    "failures_per_resident_day": 0.0536,
+    "visits_per_resident_day": 9.68
+   },
+   {
+    "rate": 0.001,
+    "failures_per_resident_day": 0.0729,
+    "visits_per_resident_day": 9.68
+   },
+   {
+    "rate": 0.002,
+    "failures_per_resident_day": 0.0804,
+    "visits_per_resident_day": 9.67
+   },
+   {
+    "rate": 0.005,
+    "failures_per_resident_day": 0.1012,
+    "visits_per_resident_day": 9.64
+   },
+   {
+    "rate": 0.01,
+    "failures_per_resident_day": 0.1592,
+    "visits_per_resident_day": 9.59
+   }
+  ]
+ }
+}

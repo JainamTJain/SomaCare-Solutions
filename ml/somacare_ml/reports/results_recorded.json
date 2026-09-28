@@ -1,0 +1,30 @@
+{
+ "frames": 1890,
+ "by_cover": {
+  "none": {
+   "n": 1328,
+   "accuracy_all": 0.8109939759036144,
+   "accuracy_when_claimed": 0.9835616438356164,
+   "unknown_rate": 0.17545180722891562
+  },
+  "sheet": {
+   "n": 562,
+   "accuracy_all": 0.7704626334519573,
+   "accuracy_when_claimed": 0.9840909090909091,
+   "unknown_rate": 0.2170818505338078
+  }
+ },
+ "true_changes": 6,
+ "detected_changes": 6,
+ "matched": 5,
+ "turn_precision": 0.8333333333333334,
+ "turn_recall": 0.8333333333333334,
+ "false_confirmed_turns": 1,
+ "false_confirms_per_hour": 3.5311427170181457,
+ "false_confirmed_share": 0.16666666666666666,
+ "false_confirms_per_hour_upper95": 19.674267981736175,
+ "median_latency_s": 30.0,
+ "tolerance_s": 120.0,
+ "hours": 0.28319444444444447,
+ "uncertain_events": 311
+}

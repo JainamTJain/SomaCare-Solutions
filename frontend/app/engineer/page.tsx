@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { FirstRun } from "../../components/FirstRun";
@@ -171,15 +172,18 @@ export default function EngineerPage() {
       {who && <FirstRun role="engineer" staffId={who} />}
       <div className="spread">
         <h1>Engineer</h1>
-        <button
-          className="choice"
-          onClick={() => {
-            clearSession();
-            router.push("/");
-          }}
-        >
-          Sign out
-        </button>
+        <div className="row">
+          <Link className="choice" href="/simulate">Fictional night</Link>
+          <button
+            className="choice"
+            onClick={() => {
+              clearSession();
+              router.push("/");
+            }}
+          >
+            Sign out
+          </button>
+        </div>
       </div>
       <p className="banner">
         Gate 1 has not been run. A blanket blocks near-infrared the same way it blocks visible light. A covered

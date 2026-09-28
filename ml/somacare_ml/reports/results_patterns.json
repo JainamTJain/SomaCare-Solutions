@@ -1,0 +1,10 @@
+{
+ "real_pattern_found": [
+  "after_meal"
+ ],
+ "regular_meals": [
+  "time_of_day",
+  "confounded"
+ ],
+ "false_positive_share": 0.01
+}
