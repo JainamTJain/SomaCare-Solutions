@@ -136,6 +136,24 @@ class RiskFactor(Base):
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class MedicationLog(Base):
+    """A dose already on the chart. Diuretic feeds continence features.
+    Sedating feeds one extra risk step. Neither is inferred from the name."""
+
+    __tablename__ = "medication_log"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    resident_id: Mapped[str] = mapped_column(ForeignKey("resident.id"))
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    medication_name: Mapped[str] = mapped_column(Text)
+    dose: Mapped[str | None] = mapped_column(Text, nullable=True)
+    route: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_diuretic: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_sedating: Mapped[bool] = mapped_column(Boolean, default=False)
+    given_by: Mapped[str | None] = mapped_column(ForeignKey("staff.id"), nullable=True)
+    scheduled: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 class Plan(Base):
     __tablename__ = "plan"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
@@ -400,3 +418,56 @@ class IngestBatch(Base):
     checksum: Mapped[str] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     summary: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+
+class ScheduleTemplate(Base):
+    """One version of a resident's fixed checks and blackout windows.
+
+    Approving a change inserts a new row. Older rows stay so the history of
+    what the nurse approved is still there.
+    """
+
+    __tablename__ = "schedule_template"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    resident_id: Mapped[str] = mapped_column(ForeignKey("resident.id"))
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    status: Mapped[str] = mapped_column(String(16), default="draft")
+    reason: Mapped[str] = mapped_column(Text)
+    windows: Mapped[list] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    approved_by: Mapped[str | None] = mapped_column(ForeignKey("staff.id"), nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class MealLog(Base):
+    __tablename__ = "meal_log"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    resident_id: Mapped[str] = mapped_column(ForeignKey("resident.id"))
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    meal_type: Mapped[str] = mapped_column(String(16))
+    items_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    percent_eaten: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    fluid_intake_ml: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    entered_by: Mapped[str | None] = mapped_column(ForeignKey("staff.id"), nullable=True)
+
+
+class Lead(Base):
+    __tablename__ = "lead"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(Text)
+    email: Mapped[str] = mapped_column(Text)
+    organization: Mapped[str | None] = mapped_column(Text, nullable=True)
+    kind: Mapped[str] = mapped_column(String(32))
+    message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class StaffTour(Base):
+    """A walkthrough a person has already seen. One row per person per tour."""
+
+    __tablename__ = "staff_tour"
+    __table_args__ = (UniqueConstraint("staff_id", "tour_key"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    staff_id: Mapped[str] = mapped_column(ForeignKey("staff.id"))
+    tour_key: Mapped[str] = mapped_column(String(40))
+    seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

@@ -7,6 +7,7 @@ weights after it beats a Braden-only baseline on a temporal split.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 
 
 def braden_band(total: int) -> str:
@@ -53,7 +54,18 @@ def extra_risk_steps(r: ResidentRisk) -> int:
     steps += 1 if r.confirmed("diabetes") or r.confirmed("vascular") else 0
     steps += 1 if r.confirmed("weight_loss") or r.braden_nutrition <= 2 else 0
     steps += 1 if r.braden_friction_shear == 1 else 0
+    # A sedating dose in the configured window is recorded as this factor
+    # from medication_log. It sits with diabetes and prior injury: less
+    # spontaneous movement, one extra step, still capped at two.
+    steps += 1 if r.confirmed("sedating_medication") else 0
     # Camera: median self-movements per night hour over the last 3 nights.
     if r.night_movements_per_hour is not None and r.night_movements_per_hour < 1.0:
         steps += 1
     return min(steps, 2)
+
+
+def dose_in_window(given_at: datetime, now: datetime, window_hours: float) -> bool:
+    """True when a dose was given inside the trailing window, and not in the future."""
+    if given_at > now:
+        return False
+    return (now - given_at).total_seconds() <= window_hours * 3600

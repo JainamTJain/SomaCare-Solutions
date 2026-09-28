@@ -14,3 +14,7 @@ jobs:
       - run: pytest
         env:
           PYTHONPATH: backend:ml:.
+      - run: python scripts/export_openapi.py --check
+        env:
+          PYTHONPATH: backend:ml:.
+          SOMACARE_CARE_CLOCK: "0"

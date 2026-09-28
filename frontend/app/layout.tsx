@@ -2,7 +2,7 @@ import "./globals.css";
 import { LanguageProvider } from "../lib/i18n";
 
 export const metadata = {
-  title: "Sorety",
+  title: "SomaCare",
   description: "The shift, in the CNA's language.",
   manifest: "/manifest.json",
 };

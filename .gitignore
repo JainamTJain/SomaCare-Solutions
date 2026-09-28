@@ -9,6 +9,7 @@ venv/
 var/
 node_modules/
 .next/
+*.tsbuildinfo
 out/
 dist/
 *.egg-info/

@@ -34,9 +34,10 @@ from turnwise.engine.budget import (
     worst_area,
 )
 from turnwise.engine.budget import turn_due
-from turnwise.engine.continence import cumulative_wet, schedule_from_hazard
-from turnwise.engine.risk_rules import ResidentRisk, extra_risk_steps
-from turnwise.engine.scheduler import SchedTask, can_verify_check, merge_tasks, risk_weight
+from turnwise.engine.continence import FEATURE_NAMES, continence_features, cumulative_wet, schedule_from_hazard
+from turnwise.engine.risk_rules import ResidentRisk, dose_in_window, extra_risk_steps
+from turnwise.engine.scheduler import SchedTask, can_verify_check, merge_tasks, risk_weight, with_caregiver_load
+from turnwise.schedule import blackout_task_ids, ensure_fixed_tasks
 from turnwise.models import (
     Alert,
     Assignment,
@@ -45,6 +46,9 @@ from turnwise.models import (
     ContinenceObs,
     Device,
     Event,
+    MealLog,
+    MedicationLog,
+    MorningVital,
     Override,
     Plan,
     Preference,
@@ -53,6 +57,7 @@ from turnwise.models import (
     RiskFactor,
     Room,
     Shift,
+    SkinCapture,
     Staff,
     Task,
 )
@@ -123,13 +128,37 @@ def approved_plan(db: Session, resident_id: str) -> Plan | None:
     )
 
 
-def resident_risk(db: Session, resident_id: str, state: ResidentState) -> ResidentRisk:
+def _medication_flags(db: Session, resident_id: str, now: datetime, config: EngineConfig) -> tuple[bool, bool]:
+    """Diuretic inside its window, and a sedating dose inside its window."""
+    now = _aware(now)
+    earliest = now - timedelta(hours=max(config.diuretic_window_hours, config.sedating_window_hours))
+    rows = (
+        db.query(MedicationLog)
+        .filter(MedicationLog.resident_id == resident_id, MedicationLog.ts >= earliest)
+        .all()
+    )
+    diuretic = False
+    sedating = False
+    for row in rows:
+        given = _aware(row.ts)
+        if row.is_diuretic and dose_in_window(given, now, config.diuretic_window_hours):
+            diuretic = True
+        if row.is_sedating and dose_in_window(given, now, config.sedating_window_hours):
+            sedating = True
+    return diuretic, sedating
+
+
+def resident_risk(db: Session, resident_id: str, state: ResidentState, now: datetime | None = None) -> ResidentRisk:
     braden = latest_braden(db, resident_id)
     factors = {
         row.factor
         for row in db.query(RiskFactor).filter(RiskFactor.resident_id == resident_id)
         if row.confirmed_by is not None
     }
+    if now is not None:
+        _diuretic, sedating = _medication_flags(db, resident_id, now, cfg())
+        if sedating:
+            factors.add("sedating_medication")
     return ResidentRisk(
         braden_total=braden.total if braden else 15,
         braden_nutrition=braden.nutrition if braden else 3,
@@ -164,7 +193,7 @@ def is_night(when: datetime, config: EngineConfig) -> bool:
 
 def limit_context(db: Session, resident_id: str, state: ResidentState, when: datetime, config: EngineConfig) -> tuple[Plan | None, LimitContext | None, ResidentRisk]:
     plan = approved_plan(db, resident_id)
-    risk = resident_risk(db, resident_id, state)
+    risk = resident_risk(db, resident_id, state, when)
     if plan is None:
         return None, None, risk
     position = state.position if state.position not in ("unknown", "out_of_room") else state.last_known
@@ -205,6 +234,24 @@ def project_state(db: Session, state: ResidentState, now: datetime, config: Engi
         state.last_ts = now
         save_budget(state, budget)
     return budget
+
+
+def _caregiver_open_tasks(db: Session, staff_id: str, now: datetime) -> int:
+    """Open tasks for every resident this caregiver is assigned on the active shift."""
+    shift = current_shift(db, now)
+    if shift is None:
+        return 0
+    resident_ids = [
+        row.resident_id
+        for row in db.query(Assignment).filter(Assignment.shift_id == shift.id, Assignment.staff_id == staff_id)
+    ]
+    if not resident_ids:
+        return 0
+    return (
+        db.query(Task)
+        .filter(Task.resident_id.in_(resident_ids), Task.status == "open")
+        .count()
+    )
 
 
 def _assigned_staff(db: Session, resident_id: str, now: datetime) -> str | None:
@@ -345,6 +392,17 @@ def ensure_continence_task(db: Session, resident: Resident, state: ResidentState
         # Nurse check kept during learning. Estimate W at that time for the card.
         bins_until = max(int((first.due_at - last).total_seconds() / 60.0 / bin_min), 1)
         w = cumulative_wet([p] * bins_until)
+    diuretic, _sedating = _medication_flags(db, resident.id, now, config)
+    local = now.astimezone(ZoneInfo(config.facility_timezone))
+    hours_since = max((now - last).total_seconds() / 3600.0, 0.0)
+    features = continence_features(
+        hours_since=hours_since,
+        hour=local.hour + local.minute / 60.0,
+        night=1.0 if is_night(now, config) else 0.0,
+        meal=0.0,
+        diuretic=1.0 if diuretic else 0.0,
+        category=0.0,
+    )
     db.add(
         Task(
             resident_id=resident.id,
@@ -360,6 +418,8 @@ def ensure_continence_task(db: Session, resident: Resident, state: ResidentState
                 "reason_params": first.reason_params,
                 "learning": config.learning_period,
                 "last_change_at": last.isoformat(),
+                "features": features,
+                "diuretic_last_6h": bool(diuretic),
             },
         )
     )
@@ -818,7 +878,10 @@ def build_shift(db: Session, staff: Staff, now: datetime) -> dict:
     config = cfg()
     tasks: list[SchedTask] = []
     resident_payload = {}
+    resident_base: dict[str, float] = {}
     verified = 0
+    queue_open = _caregiver_open_tasks(db, staff.id, now)
+    per_task = config.caregiver_load_per_open_task
     for resident in residents:
         state = db.get(ResidentState, resident.id)
         room = db.get(Room, resident.room_id)
@@ -843,6 +906,7 @@ def build_shift(db: Session, staff: Staff, now: datetime) -> dict:
                     "learning": config.learning_period,
                 }
             )
+        ensure_fixed_tasks(db, resident.id, now, config)
         open_tasks = (
             db.query(Task)
             .filter(Task.resident_id == resident.id, Task.status == "open")
@@ -863,9 +927,11 @@ def build_shift(db: Session, staff: Staff, now: datetime) -> dict:
                 why["reason_code"] = detail.get("reason_code")
                 why["reason_params"] = detail.get("reason_params")
                 why["last_change_at"] = detail.get("last_change_at")
-            priority = task.priority or 0
+            base = task.priority or 0
             if task.kind == "turn" and why.get("ratio"):
-                priority = max(priority, weight * why["ratio"])
+                base = max(base, weight * why["ratio"])
+            resident_base[resident.id] = max(resident_base.get(resident.id, 0.0), base)
+            priority = with_caregiver_load(base, queue_open, per_task)
             tasks.append(
                 SchedTask(
                     id=task.id,
@@ -896,6 +962,9 @@ def build_shift(db: Session, staff: Staff, now: datetime) -> dict:
             "monitoring": monitoring_state(db, resident.id),
         }
 
+    hidden = blackout_task_ids(db, tasks, now, config)
+    if hidden:
+        tasks = [task for task in tasks if task.id not in hidden]
     visits = merge_tasks(tasks, config.merge_window_min)
     for task in tasks:
         if task.merged_into:
@@ -921,6 +990,8 @@ def build_shift(db: Session, staff: Staff, now: datetime) -> dict:
                 "tasks": visit.kinds,
                 "due_at": visit.due_at.isoformat() if visit.due_at else None,
                 "priority": round(visit.priority, 3),
+                "base_priority": round(resident_base.get(resident.id, 0.0), 3),
+                "queue_open": queue_open,
                 "why": why,
                 "how_to": how_to_codes(info["prefs"], two_person=info["two_person"]),
                 "two_person": info["two_person"],
@@ -931,6 +1002,17 @@ def build_shift(db: Session, staff: Staff, now: datetime) -> dict:
                 "settled": bool(info["state"].settled) and alert is None,
             }
         )
+    if len(items) >= 2:
+        leader, follower = items[0], items[1]
+        load_passed = leader["queue_open"] > follower["queue_open"] and leader["base_priority"] <= follower["base_priority"]
+        code = "why.ahead.load" if load_passed else "why.ahead.pressure"
+        items[0]["ahead"] = {
+            "code": code,
+            "params": {
+                "name": follower["resident"]["preferred_name"],
+                "count": leader["queue_open"],
+            },
+        }
     db.commit()
     resident_ids = [row.id for row in residents]
     merged_visits = sum(1 for task in tasks if task.merged_into)
@@ -1004,6 +1086,222 @@ def refresh_resident_only(db: Session, resident_id: str, now: datetime) -> None:
         ensure_continence_task(db, resident, state, now, config)
         _maybe_verify_checks(db, resident, state, config)
         db.commit()
+
+
+def _source(rows: list, withheld: str | None = None) -> dict:
+    return {"empty": len(rows) == 0, "withheld": withheld, "rows": rows}
+
+
+def full_picture(db: Session, resident_id: str, now: datetime) -> dict:
+    """One read for the chart, the risk flags, the doses, and the timeline."""
+    now = _aware(now)
+    config = cfg()
+    refresh_resident_only(db, resident_id, now)
+    resident = db.get(Resident, resident_id)
+    state = db.get(ResidentState, resident_id)
+    position_ok = has_signed(db, resident_id, "position_monitoring")
+    continence_ok = has_signed(db, resident_id, "continence_tracking")
+    skin_ok = has_signed(db, resident_id, "skin_capture")
+    factors = (
+        db.query(RiskFactor).filter(RiskFactor.resident_id == resident_id).order_by(RiskFactor.factor).all()
+    )
+    factor_rows = [
+        {
+            "factor": row.factor,
+            "source": row.source,
+            "confirmed": row.confirmed_by is not None,
+        }
+        for row in factors
+    ]
+    braden = latest_braden(db, resident_id)
+    braden_row = None
+    if braden is not None:
+        braden_row = {
+            "assessed_at": _aware(braden.assessed_at).isoformat(),
+            "sensory": braden.sensory,
+            "moisture": braden.moisture,
+            "activity": braden.activity,
+            "mobility": braden.mobility,
+            "nutrition": braden.nutrition,
+            "friction_shear": braden.friction_shear,
+            "total": braden.total,
+        }
+    doses = (
+        db.query(MedicationLog)
+        .filter(MedicationLog.resident_id == resident_id)
+        .order_by(MedicationLog.ts.desc())
+        .all()
+    )
+    dose_rows = [
+        {
+            "id": row.id,
+            "ts": _aware(row.ts).isoformat(),
+            "medication_name": row.medication_name,
+            "dose": row.dose,
+            "route": row.route,
+            "is_diuretic": bool(row.is_diuretic),
+            "is_sedating": bool(row.is_sedating),
+            "in_diuretic_window": bool(row.is_diuretic)
+            and dose_in_window(_aware(row.ts), now, config.diuretic_window_hours),
+            "in_sedating_window": bool(row.is_sedating)
+            and dose_in_window(_aware(row.ts), now, config.sedating_window_hours),
+        }
+        for row in doses
+    ]
+    risk = resident_risk(db, resident_id, state, now) if state else ResidentRisk()
+    steps = extra_risk_steps(risk)
+    diuretic, _sedating = _medication_flags(db, resident_id, now, config)
+    last = _aware(state.last_change_at) if state and state.last_change_at else now
+    local = now.astimezone(ZoneInfo(config.facility_timezone))
+    features = continence_features(
+        hours_since=max((now - last).total_seconds() / 3600.0, 0.0),
+        hour=local.hour + local.minute / 60.0,
+        night=1.0 if is_night(now, config) else 0.0,
+        meal=0.0,
+        diuretic=1.0 if diuretic else 0.0,
+        category=0.0,
+    )
+    camera_kinds = {"position", "movement", "presence", "bed_exit", "bed_return", "stillness"}
+    events = (
+        db.query(Event).filter(Event.resident_id == resident_id).order_by(Event.ts.desc()).limit(40).all()
+    )
+    if position_ok:
+        event_rows = [
+            {
+                "ts": _aware(row.ts).isoformat(),
+                "kind": row.kind,
+                "value": row.value,
+            }
+            for row in events
+        ]
+        event_source = _source(event_rows)
+    else:
+        kept = [row for row in events if row.kind not in camera_kinds]
+        event_rows = [
+            {"ts": _aware(row.ts).isoformat(), "kind": row.kind, "value": row.value} for row in kept
+        ]
+        event_source = _source(event_rows, "consent")
+    if continence_ok:
+        obs = (
+            db.query(ContinenceObs)
+            .filter(ContinenceObs.resident_id == resident_id)
+            .order_by(ContinenceObs.ts.desc())
+            .limit(20)
+            .all()
+        )
+        obs_rows = [{"ts": _aware(row.ts).isoformat(), "kind": row.kind} for row in obs]
+        obs_source = _source(obs_rows)
+    else:
+        obs_rows = []
+        obs_source = _source([], "consent")
+    if skin_ok:
+        captures = (
+            db.query(SkinCapture)
+            .filter(SkinCapture.resident_id == resident_id)
+            .order_by(SkinCapture.ts.desc())
+            .limit(20)
+            .all()
+        )
+        # shown_to_staff stays false. The flag is not returned.
+        skin_rows = [
+            {
+                "ts": _aware(row.ts).isoformat(),
+                "area": row.area,
+                "shown_to_staff": False,
+            }
+            for row in captures
+        ]
+        skin_source = _source(skin_rows)
+    else:
+        skin_rows = []
+        skin_source = _source([], "consent")
+    vitals = (
+        db.query(MorningVital)
+        .filter(MorningVital.resident_id == resident_id)
+        .order_by(MorningVital.recorded_at.desc())
+        .limit(7)
+        .all()
+    )
+    vital_rows = [
+        {
+            "ts": _aware(row.recorded_at).isoformat(),
+            "systolic": row.systolic,
+            "diastolic": row.diastolic,
+            "pulse": row.pulse,
+            "temp_c": row.temp_c,
+            "spo2": row.spo2,
+            "weight_kg": row.weight_kg,
+            "source": row.source,
+        }
+        for row in vitals
+    ]
+    meals = (
+        db.query(MealLog)
+        .filter(MealLog.resident_id == resident_id)
+        .order_by(MealLog.ts.desc())
+        .limit(20)
+        .all()
+    )
+    meal_rows = [
+        {
+            "ts": _aware(row.ts).isoformat(),
+            "meal_type": row.meal_type,
+            "items_text": row.items_text,
+            "percent_eaten": row.percent_eaten,
+        }
+        for row in meals
+    ]
+    items = []
+    for row in event_rows:
+        items.append({"ts": row["ts"], "kind": row["kind"], "source": "event"})
+    for row in obs_rows:
+        items.append({"ts": row["ts"], "kind": row["kind"], "source": "continence"})
+    for row in skin_rows:
+        items.append({"ts": row["ts"], "kind": "skin_capture", "source": "skin", "area": row["area"]})
+    for row in vital_rows:
+        items.append({"ts": row["ts"], "kind": "vitals", "source": "vitals"})
+    for row in dose_rows:
+        items.append({"ts": row["ts"], "kind": "medication", "source": "medication", "name": row["medication_name"]})
+    for row in meal_rows:
+        items.append({"ts": row["ts"], "kind": "meal", "source": "meals", "meal_type": row["meal_type"]})
+    items.sort(key=lambda row: row["ts"], reverse=True)
+    feature_block = (
+        {
+            "empty": False,
+            "withheld": None,
+            "names": list(FEATURE_NAMES),
+            "values": features,
+            "diuretic": features[8],
+        }
+        if continence_ok
+        else {"empty": True, "withheld": "consent", "names": list(FEATURE_NAMES), "values": None, "diuretic": None}
+    )
+    return {
+        "resident_id": resident_id,
+        "name": resident.preferred_name if resident else None,
+        "risk_factors": _source(factor_rows),
+        "braden": {"empty": braden_row is None, "withheld": None, "rows": [braden_row] if braden_row else []},
+        "medications": _source(dose_rows),
+        "risk": {
+            "extra_steps": steps,
+            "weight": risk_weight(steps, risk.braden_total),
+            "factors": sorted(risk.factors),
+            "sedating_medication": "sedating_medication" in risk.factors,
+        },
+        "continence_features": feature_block,
+        "timeline": {
+            "empty": len(items) == 0,
+            "sources": {
+                "events": event_source,
+                "continence": obs_source,
+                "skin_captures": skin_source,
+                "vitals": _source(vital_rows),
+                "medications": _source(dose_rows),
+                "meals": _source(meal_rows),
+            },
+            "items": items[:40],
+        },
+    }
 
 
 def history(db: Session, resident_id: str, days: int, now: datetime) -> dict:

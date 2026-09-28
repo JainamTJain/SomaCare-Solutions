@@ -12,6 +12,7 @@ TABLES = [
     "assignment",
     "braden_assessment",
     "risk_factor",
+    "medication_log",
     "plan",
     "preference",
     "event",

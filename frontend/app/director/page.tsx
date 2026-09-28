@@ -86,7 +86,7 @@ export default function DirectorPage() {
   return (
     <main className="desk">
       {who && <FirstRun role="director" staffId={who} />}
-      <p className="kicker">Sorety</p>
+      <p className="kicker">SomaCare</p>
       <div className="spread">
         <h1>Director</h1>
         <button

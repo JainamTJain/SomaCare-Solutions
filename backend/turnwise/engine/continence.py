@@ -40,6 +40,48 @@ def loglik_charted_dry(p: list[float], bins: list[int]) -> float:
     return sum(math.log(_clip_prob(1 - p[j])) for j in bins)
 
 
+# Same column order as sim/continence_sim.py features(). Diuretic is index 8.
+FEATURE_NAMES = (
+    "hours_since",
+    "hours_since_sq",
+    "sin_hour",
+    "cos_hour",
+    "sin_2hour",
+    "cos_2hour",
+    "night",
+    "meal",
+    "diuretic",
+    "continence_category",
+)
+DIURETIC_INDEX = 8
+
+
+def continence_features(
+    *,
+    hours_since: float,
+    hour: float,
+    night: float,
+    meal: float,
+    diuretic: float,
+    category: float,
+) -> list[float]:
+    """The hazard feature vector. Diuretic is 1 after a dose inside the window."""
+    h = min(max(hours_since, 0.0), 12.0) / 6.0
+    ang = 2 * math.pi * (hour % 24) / 24.0
+    return [
+        h,
+        h * h,
+        math.sin(ang),
+        math.cos(ang),
+        math.sin(2 * ang),
+        math.cos(2 * ang),
+        float(night),
+        float(meal),
+        1.0 if diuretic else 0.0,
+        float(category),
+    ]
+
+
 def cumulative_wet(probs: list[float]) -> float:
     """W(t) = 1 - ∏ (1 - p_k) over bins since the last change."""
     survival = 1.0
