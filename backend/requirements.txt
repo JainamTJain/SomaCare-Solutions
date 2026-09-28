@@ -18,3 +18,6 @@ psycopg[binary]>=3.1
 pytest>=8.2
 scikit-learn>=1.4
 joblib>=1.3
+mediapipe>=0.10.14
+# skin model (optional until you have a checkpoint):
+# torch torchvision
